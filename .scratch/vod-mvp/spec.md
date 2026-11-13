@@ -1,6 +1,6 @@
 # VOD MVP: 로그인 없이 다시보기 등록·시청
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

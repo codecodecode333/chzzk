@@ -9,16 +9,16 @@ The server answers with RFC 7807 Problem Details: `400` for validation, `413` fo
 
 **Blocked by:** 01 (VOD 등록 후 목록에 보이기)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The server rejects an empty, whitespace-only or over-100-char title with `400` Problem Details naming the field
-- [ ] The server rejects an over-2,000-char description with `400`
-- [ ] The server rejects a wrong extension, and a `.mp4` without an `ftyp` signature (spoofed), with `415`
-- [ ] The server rejects a file over the configured max size (1GB by default) with `413`; the limit is configurable
-- [ ] Every API error, here and in the other endpoints, uses one Problem Details shape
-- [ ] A forced DB-insert failure leaves no file in storage (compensation)
-- [ ] Two VODs with the same title can both be registered
-- [ ] The form shows inline errors for the title, description and file type/size before submitting, with submit blocked while it is invalid
-- [ ] A server-side failure shows an error message in the form and preserves the entered title and description
-- [ ] HTTP API seam tests cover each rejection, plus compensation; the size limit is tested with a small configured limit, not a real 1GB upload
-- [ ] Frontend seam tests cover the validation messages and the blocked submit
+- [x] The server rejects an empty, whitespace-only or over-100-char title with `400` Problem Details naming the field
+- [x] The server rejects an over-2,000-char description with `400`
+- [x] The server rejects a wrong extension, and a `.mp4` without an `ftyp` signature (spoofed), with `415`
+- [x] The server rejects a file over the configured max size (1GB by default) with `413`; the limit is configurable
+- [x] Every API error, here and in the other endpoints, uses one Problem Details shape
+- [x] A forced DB-insert failure leaves no file in storage (compensation)
+- [x] Two VODs with the same title can both be registered
+- [x] The form shows inline errors for the title, description and file type/size before submitting, with submit blocked while it is invalid
+- [x] A server-side failure shows an error message in the form and preserves the entered title and description
+- [x] HTTP API seam tests cover each rejection, plus compensation; the size limit is tested with a small configured limit, not a real 1GB upload
+- [x] Frontend seam tests cover the validation messages and the blocked submit
