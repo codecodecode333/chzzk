@@ -35,19 +35,32 @@ export interface RegisterVodInput {
   file: File
 }
 
-export async function listVods(): Promise<Page<VodSummary>> {
-  const { data } = await client.get<Page<VodSummary>>('/vods')
+/** @param page zero-based page index, as the API counts it */
+export async function listVods(page = 0): Promise<Page<VodSummary>> {
+  const { data } = await client.get<Page<VodSummary>>('/vods', { params: { page } })
   return data
 }
 
-export async function registerVod(input: RegisterVodInput): Promise<Vod> {
+export interface RegisterVodOptions {
+  /** Called as the 영상 파일 is sent, with the whole-number percentage (0-100) uploaded so far. */
+  onUploadProgress?: (percent: number) => void
+}
+
+export async function registerVod(input: RegisterVodInput, options: RegisterVodOptions = {}): Promise<Vod> {
   const form = new FormData()
   form.append('title', input.title)
   if (input.description) {
     form.append('description', input.description)
   }
   form.append('file', input.file)
-  const { data } = await client.post<Vod>('/vods', form)
+  const { onUploadProgress } = options
+  const { data } = await client.post<Vod>('/vods', form, {
+    onUploadProgress: onUploadProgress
+      ? ({ loaded, total }) => {
+          if (total) onUploadProgress(Math.min(100, Math.round((loaded / total) * 100)))
+        }
+      : undefined,
+  })
   return data
 }
 
@@ -69,4 +82,15 @@ export function apiErrorMessage(error: unknown): string {
     return error.response.data.detail
   }
   return FALLBACK_ERROR_MESSAGE
+}
+
+/** Resolves to `null` when the VOD does not exist (404). */
+export async function getVod(id: string): Promise<Vod | null> {
+  try {
+    const { data } = await client.get<Vod>(`/vods/${encodeURIComponent(id)}`)
+    return data
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) return null
+    throw error
+  }
 }

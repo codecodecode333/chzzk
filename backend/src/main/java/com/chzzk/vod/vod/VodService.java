@@ -9,6 +9,8 @@ import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
+import java.util.Optional;
+import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -96,6 +98,17 @@ public class VodService {
     /** Characters as PostgreSQL VARCHAR counts them (code points), so an emoji is one char. */
     private static int charCount(String s) {
         return s.codePointCount(0, s.length());
+    }
+
+    public Optional<Vod> find(long id) {
+        return repository.findById(id);
+    }
+
+    /** The VOD's 영상 파일, or empty when the VOD is unknown or its stored file is missing. */
+    public Optional<Resource> openVideo(long id) {
+        return repository.findById(id)
+                .map(vod -> storage.open(vod.getStorageKey()))
+                .filter(Resource::exists);
     }
 
     public record VideoFileMetadata(String originalFilename, String contentType) {}

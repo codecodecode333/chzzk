@@ -11,6 +11,9 @@ export function RegisterVodPage() {
   const [description, setDescription] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  /** Percentage of the 영상 파일 sent; `null` when no upload is in flight. */
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const uploading = uploadProgress !== null
   const errors = validateVodForm({ title, description, file })
   const invalid = Object.keys(errors).length > 0
   // Errors show once a field has been edited, but submit stays blocked from the start.
@@ -20,16 +23,17 @@ export function RegisterVodPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!file || invalid) return
+    if (!file || invalid || uploading) return
     setSubmitError(null)
+    setUploadProgress(0)
     try {
-      await registerVod({ title, description, file })
+      const vod = await registerVod({ title, description, file }, { onUploadProgress: setUploadProgress })
+      navigate(`/vods/${vod.id}`)
     } catch (error) {
       // Inputs live in this component's state, so they stay as typed for a retry.
+      setUploadProgress(null)
       setSubmitError(apiErrorMessage(error))
-      return
     }
-    navigate('/')
   }
 
   return (
@@ -94,12 +98,24 @@ export function RegisterVodPage() {
           />
           <FieldError id="vod-file-error" message={shown('file')} />
         </div>
+        {uploading && (
+          <div
+            role="progressbar"
+            aria-label="업로드 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={uploadProgress}
+            className="h-2 w-full overflow-hidden rounded bg-zinc-800"
+          >
+            <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${uploadProgress}%` }} />
+          </div>
+        )}
         <button
           type="submit"
-          disabled={invalid}
+          disabled={invalid || uploading}
           className="rounded bg-emerald-500 px-4 py-2 font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          등록
+          {uploading ? `등록 중… ${uploadProgress}%` : '등록'}
         </button>
       </form>
     </section>

@@ -2,11 +2,14 @@ package com.chzzk.vod;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.nio.charset.StandardCharsets;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -62,7 +65,23 @@ class VodApiTest {
     TestRestTemplate http;
 
     @Autowired
-    JdbcTemplate db;
+    JdbcTemplate jdbc;
+
+    /** Test setup only: start from an empty VOD table so page totals are predictable. */
+    void noVods() {
+        jdbc.update("DELETE FROM vod");
+    }
+
+    ResponseEntity<Map<String, Object>> getList(String query) {
+        return http.exchange("/api/vods" + query, HttpMethod.GET, null, new ParameterizedTypeReference<>() {});
+    }
+
+    @SuppressWarnings("unchecked")
+    static List<String> titles(ResponseEntity<Map<String, Object>> page) {
+        return ((List<Map<String, Object>>) page.getBody().get("content")).stream()
+                .map(vod -> (String) vod.get("title"))
+                .toList();
+    }
 
     static long storedFileCount() throws IOException {
         try (Stream<Path> files = Files.walk(storageRoot)) {
@@ -125,6 +144,152 @@ class VodApiTest {
         assertThat(first).containsOnlyKeys("id", "title", "createdAt");
         assertThat(first).containsEntry("id", id).containsEntry("title", "내 다시보기");
         assertThat(listed.get(1)).containsEntry("title", "older");
+    }
+
+    ResponseEntity<Map<String, Object>> getJson(String url) {
+        return http.exchange(url, HttpMethod.GET, null, new ParameterizedTypeReference<>() {});
+    }
+
+    @Test
+    void detailReturnsVodWithServerComputedStreamUrl() {
+        Object id = register("상세", "설명", "clip.mp4", mp4Bytes()).getBody().get("id");
+
+        ResponseEntity<Map<String, Object>> detail = getJson("/api/vods/" + id);
+
+        assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(detail.getBody()).containsOnlyKeys("id", "title", "description", "createdAt", "streamUrl");
+        assertThat(detail.getBody())
+                .containsEntry("id", id)
+                .containsEntry("title", "상세")
+                .containsEntry("description", "설명")
+                .containsEntry("streamUrl", "/api/vods/" + id + "/stream");
+        assertThat(detail.getBody().get("createdAt")).isNotNull();
+    }
+
+    @Test
+    void detailOfUnknownVodIsProblemDetails404() {
+        ResponseEntity<Map<String, Object>> detail = getJson("/api/vods/999999");
+
+        assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(detail.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(detail.getBody()).containsEntry("status", 404);
+    }
+
+    ResponseEntity<byte[]> stream(Object id, String range) {
+        HttpHeaders headers = new HttpHeaders();
+        if (range != null) {
+            headers.set(HttpHeaders.RANGE, range);
+        }
+        return http.exchange("/api/vods/" + id + "/stream", HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+    }
+
+    @Test
+    void streamWithoutRangeReturnsWholeFile() {
+        byte[] video = mp4Bytes();
+        Object id = register("전체", null, "clip.mp4", video).getBody().get("id");
+
+        ResponseEntity<byte[]> response = stream(id, null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.parseMediaType("video/mp4"));
+        assertThat(response.getHeaders().getFirst(HttpHeaders.ACCEPT_RANGES)).isEqualTo("bytes");
+        assertThat(response.getBody()).isEqualTo(video);
+    }
+
+    @Test
+    void streamWithRangeReturnsPartialContentSlice() {
+        byte[] video = mp4Bytes(); // 29 bytes
+        Object id = register("부분", null, "clip.mp4", video).getBody().get("id");
+
+        ResponseEntity<byte[]> middle = stream(id, "bytes=4-11");
+
+        assertThat(middle.getStatusCode()).isEqualTo(HttpStatus.PARTIAL_CONTENT);
+        assertThat(middle.getHeaders().getFirst(HttpHeaders.CONTENT_RANGE)).isEqualTo("bytes 4-11/29");
+        assertThat(middle.getHeaders().getFirst(HttpHeaders.ACCEPT_RANGES)).isEqualTo("bytes");
+        assertThat(middle.getHeaders().getContentType()).isEqualTo(MediaType.parseMediaType("video/mp4"));
+        assertThat(new String(middle.getBody(), StandardCharsets.US_ASCII)).isEqualTo("ftypisom");
+
+        ResponseEntity<byte[]> openEnded = stream(id, "bytes=20-");
+
+        assertThat(openEnded.getStatusCode()).isEqualTo(HttpStatus.PARTIAL_CONTENT);
+        assertThat(openEnded.getHeaders().getFirst(HttpHeaders.CONTENT_RANGE)).isEqualTo("bytes 20-28/29");
+        assertThat(new String(openEnded.getBody(), StandardCharsets.US_ASCII)).isEqualTo("the-video");
+    }
+
+    @Test
+    void streamIs404WhenVodIsUnknown() {
+        assertThat(stream(999999, null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void streamIs404WhenStoredFileWasRemoved() throws IOException {
+        Object id = register("사라진 파일", null, "clip.mp4", mp4Bytes()).getBody().get("id");
+        Path newest;
+        try (Stream<Path> files = Files.walk(storageRoot)) {
+            newest = files.filter(Files::isRegularFile)
+                    .max(Comparator.comparing(VodApiTest::lastModified))
+                    .orElseThrow();
+        }
+        Files.delete(newest);
+
+        assertThat(stream(id, null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(stream(id, "bytes=0-3").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    static FileTime lastModified(Path file) {
+        try {
+            return Files.getLastModifiedTime(file);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Test
+    void listIsPagedNewestFirstAcrossPageBoundary() {
+        noVods();
+        for (int i = 1; i <= 21; i++) {
+            register("vod " + i, null, "v.mp4", mp4Bytes());
+        }
+
+        ResponseEntity<Map<String, Object>> first = getList("");
+        ResponseEntity<Map<String, Object>> second = getList("?page=1");
+
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(first.getBody()).containsEntry("page", 0).containsEntry("size", 20)
+                .containsEntry("totalElements", 21).containsEntry("totalPages", 2);
+        assertThat(titles(first)).hasSize(20).startsWith("vod 21", "vod 20").endsWith("vod 2");
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(second.getBody()).containsEntry("page", 1).containsEntry("totalElements", 21);
+        assertThat(titles(second)).containsExactly("vod 1");
+    }
+
+    @Test
+    void outOfRangePageIsEmptyAndOversizedPageIsCapped() {
+        noVods();
+        register("only", null, "v.mp4", mp4Bytes());
+
+        ResponseEntity<Map<String, Object>> beyond = getList("?page=5");
+        ResponseEntity<Map<String, Object>> huge = getList("?size=100000");
+
+        assertThat(beyond.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(beyond.getBody()).containsEntry("page", 5).containsEntry("totalElements", 1)
+                .containsEntry("totalPages", 1);
+        assertThat(titles(beyond)).isEmpty();
+        assertThat(huge.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(huge.getBody()).containsEntry("size", 100);
+        assertThat(titles(huge)).containsExactly("only");
+    }
+
+    @Test
+    void invalidListParamsAreRejectedAsProblemDetails() {
+        for (String query : List.of("?page=-1", "?size=0", "?size=-5", "?page=abc", "?size=xyz")) {
+            ResponseEntity<Map<String, Object>> response = getList(query);
+
+            assertThat(response.getStatusCode()).as(query).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(response.getHeaders().getContentType()).as(query)
+                    .isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+            assertThat(response.getBody()).as(query).containsEntry("status", 400).containsKey("title");
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -193,7 +358,7 @@ class VodApiTest {
     @Test
     void failedInsertLeavesNoStoredFileAndNoListedVod() throws IOException {
         String doomedTitle = "insert-will-fail";
-        db.execute("ALTER TABLE vod ADD CONSTRAINT force_insert_failure CHECK (title <> '" + doomedTitle + "')");
+        jdbc.execute("ALTER TABLE vod ADD CONSTRAINT force_insert_failure CHECK (title <> '" + doomedTitle + "')");
         try {
             long filesBefore = storedFileCount();
 
@@ -203,7 +368,7 @@ class VodApiTest {
             assertThat(storedFileCount()).isEqualTo(filesBefore);
             assertThat(listContent()).noneMatch(vod -> doomedTitle.equals(vod.get("title")));
         } finally {
-            db.execute("ALTER TABLE vod DROP CONSTRAINT force_insert_failure");
+            jdbc.execute("ALTER TABLE vod DROP CONSTRAINT force_insert_failure");
         }
     }
 
