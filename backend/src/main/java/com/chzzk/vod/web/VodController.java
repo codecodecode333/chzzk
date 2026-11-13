@@ -33,16 +33,21 @@ class VodController {
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     ResponseEntity<VodResponse> register(
-            @RequestParam String title,
+            @RequestParam(required = false) String title,
             @RequestParam(required = false) String description,
-            @RequestParam MultipartFile file) throws IOException {
+            @RequestParam(required = false) MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) {
+            return created(vods.register(title, description, null, new VideoFileMetadata("", "")));
+        }
         VideoFileMetadata metadata = new VideoFileMetadata(
                 Objects.requireNonNullElse(file.getOriginalFilename(), ""),
                 Objects.requireNonNullElse(file.getContentType(), MediaType.APPLICATION_OCTET_STREAM_VALUE));
-        Vod vod;
         try (InputStream content = file.getInputStream()) {
-            vod = vods.register(title, description, content, metadata);
+            return created(vods.register(title, description, content, metadata));
         }
+    }
+
+    private static ResponseEntity<VodResponse> created(Vod vod) {
         return ResponseEntity.created(URI.create("/api/vods/" + vod.getId())).body(VodResponse.of(vod));
     }
 

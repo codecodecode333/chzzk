@@ -3,9 +3,13 @@ package com.chzzk.vod;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +24,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.LinkedMultiValueMap;
@@ -43,10 +48,27 @@ class VodApiTest {
     @DynamicPropertySource
     static void storage(DynamicPropertyRegistry registry) {
         registry.add("vod.storage.local.root", () -> storageRoot.toString());
+        registry.add("vod.upload.max-file-size", () -> MAX_FILE_SIZE_BYTES + "B"); // stands in for the 1GB default
+    }
+
+    // Above a max-length description (servlet part limits apply to every part), far below 1GB.
+    static final int MAX_FILE_SIZE_BYTES = 16 * 1024;
+
+    static byte[] mp4BytesOfSize(int size) {
+        return Arrays.copyOf(mp4Bytes(), size);
     }
 
     @Autowired
     TestRestTemplate http;
+
+    @Autowired
+    JdbcTemplate db;
+
+    static long storedFileCount() throws IOException {
+        try (Stream<Path> files = Files.walk(storageRoot)) {
+            return files.filter(Files::isRegularFile).count();
+        }
+    }
 
     /** Minimal bytes that start with an MP4 `ftyp` box. */
     static byte[] mp4Bytes() {
@@ -103,5 +125,108 @@ class VodApiTest {
         assertThat(first).containsOnlyKeys("id", "title", "createdAt");
         assertThat(first).containsEntry("id", id).containsEntry("title", "내 다시보기");
         assertThat(listed.get(1)).containsEntry("title", "older");
+    }
+
+    @SuppressWarnings("unchecked")
+    static void assertProblem(ResponseEntity<Map<String, Object>> response, HttpStatus status) {
+        assertThat(response.getStatusCode()).isEqualTo(status);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(response.getBody())
+                .containsEntry("status", status.value())
+                .containsKeys("type", "title", "detail", "instance");
+    }
+
+    @SuppressWarnings("unchecked")
+    static List<String> invalidFields(ResponseEntity<Map<String, Object>> response) {
+        List<Map<String, Object>> errors = (List<Map<String, Object>>) response.getBody().get("errors");
+        return errors.stream().map(e -> (String) e.get("field")).toList();
+    }
+
+    @Test
+    void whitespaceOnlyTitleIsRejectedNamingTheField() {
+        ResponseEntity<Map<String, Object>> response = register("   ", null, "clip.mp4", mp4Bytes());
+
+        assertProblem(response, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(response)).containsExactly("title");
+    }
+
+    @Test
+    void titleOverOneHundredCharsIsRejectedButExactlyOneHundredIsAccepted() {
+        ResponseEntity<Map<String, Object>> tooLong = register("가".repeat(101), null, "clip.mp4", mp4Bytes());
+
+        assertProblem(tooLong, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(tooLong)).containsExactly("title");
+        assertThat(register("  " + "가".repeat(100) + "  ", null, "clip.mp4", mp4Bytes()).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void descriptionOverTwoThousandCharsIsRejectedButExactlyTwoThousandIsAccepted() {
+        ResponseEntity<Map<String, Object>> tooLong = register("제목", "a".repeat(2001), "clip.mp4", mp4Bytes());
+
+        assertProblem(tooLong, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(tooLong)).containsExactly("description");
+        assertThat(register("제목", "a".repeat(2000), "clip.mp4", mp4Bytes()).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void fileWithoutMp4ExtensionIsRejectedAsUnsupported() {
+        assertProblem(register("제목", null, "clip.avi", mp4Bytes()), HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    @Test
+    void mp4ExtensionWithoutFtypSignatureIsRejectedAsUnsupported() {
+        byte[] spoofed = "this is really a text file".getBytes(StandardCharsets.US_ASCII);
+
+        assertProblem(register("제목", null, "clip.mp4", spoofed), HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    @Test
+    void fileOverTheConfiguredMaxSizeIsRejectedButExactlyTheMaxIsAccepted() {
+        assertProblem(register("제목", null, "big.mp4", mp4BytesOfSize(MAX_FILE_SIZE_BYTES + 1)),
+                HttpStatus.PAYLOAD_TOO_LARGE);
+        assertThat(register("제목", null, "max.mp4", mp4BytesOfSize(MAX_FILE_SIZE_BYTES)).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void failedInsertLeavesNoStoredFileAndNoListedVod() throws IOException {
+        String doomedTitle = "insert-will-fail";
+        db.execute("ALTER TABLE vod ADD CONSTRAINT force_insert_failure CHECK (title <> '" + doomedTitle + "')");
+        try {
+            long filesBefore = storedFileCount();
+
+            ResponseEntity<Map<String, Object>> response = register(doomedTitle, null, "clip.mp4", mp4Bytes());
+
+            assertProblem(response, HttpStatus.INTERNAL_SERVER_ERROR);
+            assertThat(storedFileCount()).isEqualTo(filesBefore);
+            assertThat(listContent()).noneMatch(vod -> doomedTitle.equals(vod.get("title")));
+        } finally {
+            db.execute("ALTER TABLE vod DROP CONSTRAINT force_insert_failure");
+        }
+    }
+
+    @Test
+    void duplicateTitlesCanBothBeRegistered() {
+        assertThat(register("같은 제목", null, "a.mp4", mp4Bytes()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(register("같은 제목", null, "b.mp4", mp4Bytes()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void unknownApiRouteAnswersInTheSameProblemShape() {
+        ResponseEntity<Map<String, Object>> response =
+                http.exchange("/api/nothing-here", HttpMethod.GET, null, new ParameterizedTypeReference<>() {});
+
+        assertProblem(response, HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).containsEntry("instance", "/api/nothing-here");
+    }
+
+    @Test
+    void emptyFileIsRejectedNamingTheField() {
+        ResponseEntity<Map<String, Object>> response = register("제목", null, "clip.mp4", new byte[0]);
+
+        assertProblem(response, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(response)).containsExactly("file");
     }
 }

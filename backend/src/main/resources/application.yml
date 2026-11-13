@@ -11,13 +11,16 @@ spring:
       ddl-auto: validate
   servlet:
     multipart:
-      max-file-size: 1GB
-      max-request-size: 1100MB
+      # The 영상 파일 limit is enforced while parsing the multipart request, before anything is stored.
+      max-file-size: ${vod.upload.max-file-size}
+      max-request-size: ${VOD_MAX_REQUEST_SIZE:1100MB}
   mvc:
     problemdetails:
       enabled: true
 
 vod:
+  upload:
+    max-file-size: ${VOD_MAX_FILE_SIZE:1GB}
   storage:
     local:
       root: ${VOD_STORAGE_ROOT:./data}

@@ -23,7 +23,7 @@ docker compose up -d                 # PostgreSQL on localhost:5432 (db/user/pas
 
 cd backend && ./gradlew bootRun      # http://localhost:8080
 # Uploaded 영상 파일 are stored under backend/data/ (git-ignored).
-# Override with VOD_STORAGE_ROOT, DB_URL, DB_USERNAME, DB_PASSWORD.
+# Override with VOD_STORAGE_ROOT, VOD_MAX_FILE_SIZE (default 1GB), DB_URL, DB_USERNAME, DB_PASSWORD.
 
 cd frontend && npm install && npm run dev   # http://localhost:5173, proxies /api to :8080
 ```
@@ -38,4 +38,6 @@ cd frontend && npm test              # Page components: Vitest + Testing Library
 Conventions:
 - Backend tests go through HTTP only (`backend/src/test/.../VodApiTest.java`); video storage is rooted in a temp dir.
 - Frontend tests render routes via `AppRoutes` in a `MemoryRouter` and register MSW handlers per test (`src/test/server.ts`).
+- Every API error is RFC 7807 Problem Details from `ApiProblemHandler` (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation). Throw `ResponseStatusException` or a domain exception mapped there; don't hand-roll error bodies.
+- Registration form rules live in `frontend/src/vods/validateVodForm.ts` (pure, mirrors the server), separate from how the form submits.
 - All frontend data access lives in `frontend/src/api/vods.ts`; extend it rather than calling the network from pages.
