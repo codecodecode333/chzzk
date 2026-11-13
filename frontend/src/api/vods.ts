@@ -35,8 +35,9 @@ export interface RegisterVodInput {
   file: File
 }
 
-export async function listVods(): Promise<Page<VodSummary>> {
-  const { data } = await client.get<Page<VodSummary>>('/vods')
+/** @param page zero-based page index, as the API counts it */
+export async function listVods(page = 0): Promise<Page<VodSummary>> {
+  const { data } = await client.get<Page<VodSummary>>('/vods', { params: { page } })
   return data
 }
 

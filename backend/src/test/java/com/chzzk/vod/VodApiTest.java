@@ -20,6 +20,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.LinkedMultiValueMap;
@@ -47,6 +48,25 @@ class VodApiTest {
 
     @Autowired
     TestRestTemplate http;
+
+    @Autowired
+    JdbcTemplate jdbc;
+
+    /** Test setup only: start from an empty VOD table so page totals are predictable. */
+    void noVods() {
+        jdbc.update("DELETE FROM vod");
+    }
+
+    ResponseEntity<Map<String, Object>> getList(String query) {
+        return http.exchange("/api/vods" + query, HttpMethod.GET, null, new ParameterizedTypeReference<>() {});
+    }
+
+    @SuppressWarnings("unchecked")
+    static List<String> titles(ResponseEntity<Map<String, Object>> page) {
+        return ((List<Map<String, Object>>) page.getBody().get("content")).stream()
+                .map(vod -> (String) vod.get("title"))
+                .toList();
+    }
 
     /** Minimal bytes that start with an MP4 `ftyp` box. */
     static byte[] mp4Bytes() {
@@ -103,5 +123,53 @@ class VodApiTest {
         assertThat(first).containsOnlyKeys("id", "title", "createdAt");
         assertThat(first).containsEntry("id", id).containsEntry("title", "내 다시보기");
         assertThat(listed.get(1)).containsEntry("title", "older");
+    }
+
+    @Test
+    void listIsPagedNewestFirstAcrossPageBoundary() {
+        noVods();
+        for (int i = 1; i <= 21; i++) {
+            register("vod " + i, null, "v.mp4", mp4Bytes());
+        }
+
+        ResponseEntity<Map<String, Object>> first = getList("");
+        ResponseEntity<Map<String, Object>> second = getList("?page=1");
+
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(first.getBody()).containsEntry("page", 0).containsEntry("size", 20)
+                .containsEntry("totalElements", 21).containsEntry("totalPages", 2);
+        assertThat(titles(first)).hasSize(20).startsWith("vod 21", "vod 20").endsWith("vod 2");
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(second.getBody()).containsEntry("page", 1).containsEntry("totalElements", 21);
+        assertThat(titles(second)).containsExactly("vod 1");
+    }
+
+    @Test
+    void outOfRangePageIsEmptyAndOversizedPageIsCapped() {
+        noVods();
+        register("only", null, "v.mp4", mp4Bytes());
+
+        ResponseEntity<Map<String, Object>> beyond = getList("?page=5");
+        ResponseEntity<Map<String, Object>> huge = getList("?size=100000");
+
+        assertThat(beyond.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(beyond.getBody()).containsEntry("page", 5).containsEntry("totalElements", 1)
+                .containsEntry("totalPages", 1);
+        assertThat(titles(beyond)).isEmpty();
+        assertThat(huge.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(huge.getBody()).containsEntry("size", 100);
+        assertThat(titles(huge)).containsExactly("only");
+    }
+
+    @Test
+    void invalidListParamsAreRejectedAsProblemDetails() {
+        for (String query : List.of("?page=-1", "?size=0", "?size=-5", "?page=abc", "?size=xyz")) {
+            ResponseEntity<Map<String, Object>> response = getList(query);
+
+            assertThat(response.getStatusCode()).as(query).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(response.getHeaders().getContentType()).as(query)
+                    .isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+            assertThat(response.getBody()).as(query).containsEntry("status", 400).containsKey("title");
+        }
     }
 }

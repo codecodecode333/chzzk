@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
@@ -39,6 +39,49 @@ describe('VOD list page', () => {
     expect(cards[0]).toHaveTextContent('두 번째 다시보기')
     expect(cards[0]).toHaveTextContent('2026. 11. 12.')
     expect(cards[1]).toHaveTextContent('첫 다시보기')
+    expect(screen.queryByRole('navigation', { name: '페이지' })).not.toBeInTheDocument()
+  })
+
+  it('reads the current page from the URL and moves between pages', async () => {
+    const user = userEvent.setup()
+    const requested: Array<string | null> = []
+    server.use(
+      http.get('/api/vods', ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        requested.push(new URL(request.url).searchParams.get('page'))
+        return HttpResponse.json({
+          content: [{ id: 100 - page, title: `${page + 1}쪽 다시보기`, createdAt: '2026-11-01T10:00:00Z' }],
+          page,
+          size: 20,
+          totalElements: 45,
+          totalPages: 3,
+        })
+      }),
+    )
+
+    renderAt('/?page=2')
+
+    expect(await screen.findByRole('article')).toHaveTextContent('2쪽 다시보기')
+    expect(requested).toEqual(['1'])
+    const pager = screen.getByRole('navigation', { name: '페이지' })
+    expect(within(pager).getByRole('link', { name: '2' })).toHaveAttribute('aria-current', 'page')
+
+    await user.click(within(pager).getByRole('link', { name: '다음' }))
+
+    expect(await screen.findByText('3쪽 다시보기')).toBeInTheDocument()
+    expect(within(pager).getByRole('link', { name: '3' })).toHaveAttribute('aria-current', 'page')
+    expect(within(pager).queryByRole('link', { name: '다음' })).not.toBeInTheDocument()
+  })
+
+  it('shows the empty state with a register button when there are no VODs', async () => {
+    server.use(http.get('/api/vods', () => HttpResponse.json(pageOf([]))))
+
+    renderAt('/')
+
+    expect(await screen.findByText('아직 등록된 다시보기가 없습니다')).toBeInTheDocument()
+    const main = screen.getByRole('main')
+    expect(within(main).getByRole('link', { name: '다시보기 등록' })).toHaveAttribute('href', '/vods/new')
+    expect(screen.queryByRole('article')).not.toBeInTheDocument()
   })
 })
 
