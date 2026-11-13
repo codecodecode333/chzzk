@@ -1,0 +1,25 @@
+# Stored video data (LOCAL storage root)
+data/
+backend/data/
+
+# Backend build output
+backend/build/
+backend/.gradle/
+backend/bin/
+backend/out/
+
+# Frontend dependencies and build output
+node_modules/
+frontend/dist/
+frontend/coverage/
+*.tsbuildinfo
+
+# Logs, env, OS, IDE
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml

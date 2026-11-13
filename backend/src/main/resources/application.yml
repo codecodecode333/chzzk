@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: chzzk-vod
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/chzzk}
+    username: ${DB_USERNAME:chzzk}
+    password: ${DB_PASSWORD:chzzk}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  servlet:
+    multipart:
+      max-file-size: 1GB
+      max-request-size: 1100MB
+  mvc:
+    problemdetails:
+      enabled: true
+
+vod:
+  storage:
+    local:
+      root: ${VOD_STORAGE_ROOT:./data}
