@@ -28,6 +28,10 @@ cd backend && ./gradlew bootRun      # http://localhost:8080
 cd frontend && npm install && npm run dev   # http://localhost:5173, proxies /api to :8080
 ```
 
+영상 파일 size limit: set `VOD_MAX_FILE_SIZE` (backend, e.g. `512MB`; the multipart request limit is derived from it)
+and `VITE_VOD_MAX_FILE_SIZE` (frontend, same format, default `1GB`, read at `npm run dev`/`npm run build` time) to the
+same value. The form checks the size first; the server stays authoritative and answers `413` with the configured limit.
+
 ## Tests
 
 ```sh

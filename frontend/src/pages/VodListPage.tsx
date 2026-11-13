@@ -18,10 +18,11 @@ export function VodListPage() {
 
   useEffect(() => {
     let active = true
-    setLoadError(null)
     listVods(pageNumber - 1).then(
       (result) => {
-        if (active) setVods(result)
+        if (!active) return
+        setLoadError(null)
+        setVods(result)
       },
       (error: unknown) => {
         if (active) setLoadError(apiErrorMessage(error))

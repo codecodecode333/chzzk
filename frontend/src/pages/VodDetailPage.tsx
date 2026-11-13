@@ -13,11 +13,11 @@ export function VodDetailPage() {
 
   useEffect(() => {
     let active = true
-    setVod(undefined)
-    setLoadError(null)
     getVod(id).then(
       (found) => {
-        if (active) setVod(found)
+        if (!active) return
+        setLoadError(null)
+        setVod(found)
       },
       (error: unknown) => {
         if (active) setLoadError(apiErrorMessage(error))

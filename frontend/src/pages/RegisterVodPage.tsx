@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ReactElement } from 'react'
 import { useNavigate } from 'react-router'
 import { apiErrorMessage, registerVod } from '../api/vods'
 import { validateVodForm, type VodFormField } from '../vods/validateVodForm'
@@ -19,7 +19,7 @@ export function RegisterVodPage() {
   // Errors show once a field has been edited, but submit stays blocked from the start.
   const [touched, setTouched] = useState<ReadonlySet<VodFormField>>(new Set())
   const touch = (field: VodFormField) => setTouched((prev) => (prev.has(field) ? prev : new Set(prev).add(field)))
-  const shown = (field: VodFormField) => (touched.has(field) ? errors[field] : undefined)
+  const visibleError = (field: VodFormField) => (touched.has(field) ? errors[field] : undefined)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -45,59 +45,47 @@ export function RegisterVodPage() {
             {submitError}
           </p>
         )}
-        <div>
-          <label htmlFor="vod-title" className="mb-1 block text-sm font-medium">
-            제목
-          </label>
-          <input
-            id="vod-title"
-            className={inputClass}
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value)
-              touch('title')
-            }}
-            aria-invalid={shown('title') ? true : undefined}
-            aria-describedby={shown('title') ? 'vod-title-error' : undefined}
-            required
-          />
-          <FieldError id="vod-title-error" message={shown('title')} />
-        </div>
-        <div>
-          <label htmlFor="vod-description" className="mb-1 block text-sm font-medium">
-            설명
-          </label>
-          <textarea
-            id="vod-description"
-            className={inputClass}
-            rows={4}
-            value={description}
-            onChange={(e) => {
-              setDescription(e.target.value)
-              touch('description')
-            }}
-            aria-invalid={shown('description') ? true : undefined}
-            aria-describedby={shown('description') ? 'vod-description-error' : undefined}
-          />
-          <FieldError id="vod-description-error" message={shown('description')} />
-        </div>
-        <div>
-          <label htmlFor="vod-file" className="mb-1 block text-sm font-medium">
-            영상 파일
-          </label>
-          <input
-            id="vod-file"
-            type="file"
-            accept="video/mp4,.mp4"
-            onChange={(e) => {
-              setFile(e.target.files?.[0] ?? null)
-              touch('file')
-            }}
-            aria-invalid={shown('file') ? true : undefined}
-            aria-describedby={shown('file') ? 'vod-file-error' : undefined}
-          />
-          <FieldError id="vod-file-error" message={shown('file')} />
-        </div>
+        <Field id="vod-title" label="제목" error={visibleError('title')}>
+          {(a11y) => (
+            <input
+              {...a11y}
+              className={inputClass}
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value)
+                touch('title')
+              }}
+              required
+            />
+          )}
+        </Field>
+        <Field id="vod-description" label="설명" error={visibleError('description')}>
+          {(a11y) => (
+            <textarea
+              {...a11y}
+              className={inputClass}
+              rows={4}
+              value={description}
+              onChange={(e) => {
+                setDescription(e.target.value)
+                touch('description')
+              }}
+            />
+          )}
+        </Field>
+        <Field id="vod-file" label="영상 파일" error={visibleError('file')}>
+          {(a11y) => (
+            <input
+              {...a11y}
+              type="file"
+              accept="video/mp4,.mp4"
+              onChange={(e) => {
+                setFile(e.target.files?.[0] ?? null)
+                touch('file')
+              }}
+            />
+          )}
+        </Field>
         {uploading && (
           <div
             role="progressbar"
@@ -122,11 +110,40 @@ export function RegisterVodPage() {
   )
 }
 
-function FieldError({ id, message }: { id: string; message: string | undefined }) {
-  if (!message) return null
+interface FieldA11yProps {
+  id: string
+  'aria-invalid': true | undefined
+  'aria-describedby': string | undefined
+}
+
+/** A labelled form control with its validation error wired up for assistive tech. */
+function Field({
+  id,
+  label,
+  error,
+  children,
+}: {
+  id: string
+  label: string
+  error: string | undefined
+  children: (a11y: FieldA11yProps) => ReactElement
+}) {
+  const errorId = `${id}-error`
   return (
-    <p id={id} className="mt-1 text-sm text-red-400">
-      {message}
-    </p>
+    <div>
+      <label htmlFor={id} className="mb-1 block text-sm font-medium">
+        {label}
+      </label>
+      {children({
+        id,
+        'aria-invalid': error ? true : undefined,
+        'aria-describedby': error ? errorId : undefined,
+      })}
+      {error && (
+        <p id={errorId} className="mt-1 text-sm text-red-400">
+          {error}
+        </p>
+      )}
+    </div>
   )
 }

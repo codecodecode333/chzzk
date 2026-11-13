@@ -225,7 +225,7 @@ describe('VOD detail page', () => {
     server.use(
       http.get('/api/vods/404', () =>
         HttpResponse.json(
-          { type: 'about:blank', title: 'Not Found', status: 404, detail: 'VOD 404 not found' },
+          { type: 'about:blank', title: 'Not Found', status: 404, detail: '404번 다시보기를 찾을 수 없습니다.' },
           { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
         ),
       ),
@@ -304,6 +304,8 @@ describe('VOD detail page', () => {
 })
 
 describe('VOD registration form validation', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
   function mp4(name = 'clip.mp4') {
     return new File([new Uint8Array([0, 0, 0, 0x18])], name, { type: 'video/mp4' })
   }
@@ -376,6 +378,20 @@ describe('VOD registration form validation', () => {
     await user.upload(screen.getByLabelText('영상 파일'), huge)
 
     expect(screen.getByText('영상 파일은 1GB 이하만 등록할 수 있습니다.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '등록' })).toBeDisabled()
+  })
+
+  it('rejects a file larger than the limit configured with VITE_VOD_MAX_FILE_SIZE', async () => {
+    vi.stubEnv('VITE_VOD_MAX_FILE_SIZE', '16KB')
+    const user = userEvent.setup()
+    renderAt('/vods/new')
+    const big = mp4('big.mp4')
+    Object.defineProperty(big, 'size', { value: 16 * 1024 + 1 })
+
+    await user.type(screen.getByLabelText('제목'), '제목')
+    await user.upload(screen.getByLabelText('영상 파일'), big)
+
+    expect(screen.getByText('영상 파일은 16KB 이하만 등록할 수 있습니다.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '등록' })).toBeDisabled()
   })
 
