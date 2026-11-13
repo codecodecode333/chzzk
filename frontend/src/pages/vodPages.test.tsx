@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AppRoutes } from '../AppRoutes'
 import { server } from '../test/server'
 
@@ -85,11 +85,51 @@ describe('VOD list page', () => {
   })
 })
 
+/**
+ * happy-dom never fires XHR upload progress, so stand in for the network: the first
+ * request body sent reports `loaded` of `total` bytes before going out to MSW.
+ */
+function emitUploadProgress(loaded: number, total: number) {
+  const send = XMLHttpRequest.prototype.send
+  return vi.spyOn(XMLHttpRequest.prototype, 'send').mockImplementation(function (
+    this: XMLHttpRequest,
+    body?: Document | XMLHttpRequestBodyInit | null,
+  ) {
+    send.call(this, body)
+    if (body instanceof FormData) {
+      this.upload.dispatchEvent(new ProgressEvent('progress', { lengthComputable: true, loaded, total }))
+    }
+  })
+}
+
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
+async function fillRegistrationForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText('제목'), '새 다시보기')
+  await user.type(screen.getByLabelText('설명'), '설명입니다')
+  const file = new File([new Uint8Array([0, 0, 0, 0x18])], 'clip.mp4', { type: 'video/mp4' })
+  await user.upload(screen.getByLabelText('영상 파일'), file)
+}
+
 describe('VOD registration page', () => {
-  it('submits title, description and file, then shows the new VOD on the list', async () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('shows upload progress with submit disabled, then lands on the new VOD detail page', async () => {
     const user = userEvent.setup()
+    emitUploadProgress(40, 80)
+    const uploaded = deferred()
     let received: { title: unknown; description: unknown; fileName: unknown } | undefined
-    const listed: Array<{ id: number; title: string; createdAt: string }> = []
+    const created = {
+      id: 7,
+      title: '새 다시보기',
+      description: '설명입니다',
+      createdAt: '2026-11-13T09:00:00Z',
+      streamUrl: '/api/vods/7/stream',
+    }
 
     server.use(
       http.post('/api/vods', async ({ request }) => {
@@ -100,27 +140,48 @@ describe('VOD registration page', () => {
           description: form.get('description'),
           fileName: file instanceof Blob ? (file as File).name : file,
         }
-        const vod = { id: 7, title: String(form.get('title')), createdAt: '2026-11-13T09:00:00Z' }
-        listed.unshift(vod)
-        return HttpResponse.json(
-          { ...vod, description: form.get('description'), streamUrl: '/api/vods/7/stream' },
-          { status: 201, headers: { Location: '/api/vods/7' } },
-        )
+        await uploaded.promise
+        return HttpResponse.json(created, { status: 201, headers: { Location: '/api/vods/7' } })
       }),
-      http.get('/api/vods', () => HttpResponse.json(pageOf(listed))),
+      http.get('/api/vods/7', () => HttpResponse.json(created)),
     )
 
     renderAt('/vods/new')
-
-    await user.type(screen.getByLabelText('제목'), '새 다시보기')
-    await user.type(screen.getByLabelText('설명'), '설명입니다')
-    const file = new File([new Uint8Array([0, 0, 0, 0x18])], 'clip.mp4', { type: 'video/mp4' })
-    await user.upload(screen.getByLabelText('영상 파일'), file)
+    await fillRegistrationForm(user)
     await user.click(screen.getByRole('button', { name: '등록' }))
 
-    const card = await screen.findByRole('article')
-    expect(card).toHaveTextContent('새 다시보기')
+    const bar = await screen.findByRole('progressbar', { name: '업로드 진행률' })
+    await waitFor(() => expect(bar).toHaveAttribute('aria-valuenow', '50'))
+    expect(screen.getByRole('button', { name: /등록/ })).toBeDisabled()
+
+    uploaded.resolve()
+
+    expect(await screen.findByRole('heading', { name: '새 다시보기' })).toBeInTheDocument()
+    expect(screen.getByTestId('vod-player')).toHaveAttribute('src', '/api/vods/7/stream')
     expect(received).toEqual({ title: '새 다시보기', description: '설명입니다', fileName: 'clip.mp4' })
+  })
+
+  it('resets progress and re-enables submit with inputs kept when the upload fails', async () => {
+    const user = userEvent.setup()
+    emitUploadProgress(40, 80)
+    server.use(
+      http.post('/api/vods', () =>
+        HttpResponse.json(
+          { type: 'about:blank', title: 'Internal Server Error', status: 500 },
+          { status: 500, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderAt('/vods/new')
+    await fillRegistrationForm(user)
+    await user.click(screen.getByRole('button', { name: '등록' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록' })).toBeEnabled())
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('제목')).toHaveValue('새 다시보기')
+    expect(screen.getByLabelText('설명')).toHaveValue('설명입니다')
+    expect(screen.getByRole('heading', { name: '다시보기 등록' })).toBeInTheDocument()
   })
 })
 

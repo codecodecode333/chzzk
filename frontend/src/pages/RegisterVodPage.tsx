@@ -9,12 +9,20 @@ export function RegisterVodPage() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  /** Percentage of the 영상 파일 sent; `null` when no upload is in flight. */
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const uploading = uploadProgress !== null
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!file) return
-    await registerVod({ title, description, file })
-    navigate('/')
+    if (!file || uploading) return
+    setUploadProgress(0)
+    try {
+      const vod = await registerVod({ title, description, file }, { onUploadProgress: setUploadProgress })
+      navigate(`/vods/${vod.id}`)
+    } catch {
+      setUploadProgress(null)
+    }
   }
 
   return (
@@ -56,11 +64,24 @@ export function RegisterVodPage() {
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
         </div>
+        {uploading && (
+          <div
+            role="progressbar"
+            aria-label="업로드 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={uploadProgress}
+            className="h-2 w-full overflow-hidden rounded bg-zinc-800"
+          >
+            <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${uploadProgress}%` }} />
+          </div>
+        )}
         <button
           type="submit"
-          className="rounded bg-emerald-500 px-4 py-2 font-semibold text-zinc-950 hover:bg-emerald-400"
+          disabled={uploading}
+          className="rounded bg-emerald-500 px-4 py-2 font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          등록
+          {uploading ? `등록 중… ${uploadProgress}%` : '등록'}
         </button>
       </form>
     </section>
