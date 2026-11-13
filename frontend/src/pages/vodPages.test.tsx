@@ -83,6 +83,15 @@ describe('VOD list page', () => {
     expect(within(main).getByRole('link', { name: '다시보기 등록' })).toHaveAttribute('href', '/vods/new')
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
   })
+
+  it('shows an error message instead of a blank page when the list cannot be loaded', async () => {
+    server.use(http.get('/api/vods', () => HttpResponse.error()))
+
+    renderAt('/')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('잠시 후 다시 시도해 주세요.')
+    expect(screen.queryByText('아직 등록된 다시보기가 없습니다')).not.toBeInTheDocument()
+  })
 })
 
 /**
@@ -228,13 +237,67 @@ describe('VOD detail page', () => {
     expect(screen.queryByTestId('vod-player')).not.toBeInTheDocument()
   })
 
+  it('shows the not-found view for an id that is not a VOD id', async () => {
+    server.use(
+      http.get('/api/vods/:id', () =>
+        HttpResponse.json(
+          { type: 'about:blank', title: 'Bad Request', status: 400 },
+          { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderAt('/vods/abc')
+
+    expect(await screen.findByRole('heading', { name: '다시보기를 찾을 수 없습니다' })).toBeInTheDocument()
+  })
+
+  it('shows the not-found view when the server cannot parse an over-long numeric id', async () => {
+    server.use(
+      http.get('/api/vods/:id', () =>
+        HttpResponse.json(
+          { type: 'about:blank', title: 'Bad Request', status: 400 },
+          { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderAt('/vods/99999999999999999999999')
+
+    expect(await screen.findByRole('heading', { name: '다시보기를 찾을 수 없습니다' })).toBeInTheDocument()
+  })
+
+  it('shows an error message when the VOD cannot be loaded', async () => {
+    server.use(
+      http.get('/api/vods/3', () =>
+        HttpResponse.json(
+          { type: 'about:blank', title: 'Internal Server Error', status: 500, detail: '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.' },
+          { status: 500, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderAt('/vods/3')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('잠시 후 다시 시도해 주세요.')
+    expect(screen.queryByTestId('vod-player')).not.toBeInTheDocument()
+  })
+
+  it('shows an error message when the network fails', async () => {
+    server.use(http.get('/api/vods/3', () => HttpResponse.error()))
+
+    renderAt('/vods/3')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('잠시 후 다시 시도해 주세요.')
+  })
+
   it('replaces the player with an error message when the video fails to play', async () => {
     server.use(http.get('/api/vods/3', () => HttpResponse.json(detail)))
 
     renderAt('/vods/3')
     fireEvent.error(await screen.findByTestId('vod-player'))
 
-    expect(await screen.findByText('영상을 재생할 수 없습니다')).toBeInTheDocument()
+    expect(await screen.findByText('다시보기를 재생할 수 없습니다')).toBeInTheDocument()
     expect(screen.queryByTestId('vod-player')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '상세 다시보기' })).toBeInTheDocument()
   })

@@ -1,22 +1,34 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { getVod, type Vod } from '../api/vods'
+import { apiErrorMessage, getVod, type Vod } from '../api/vods'
+import { LoadError } from './LoadError'
 import { formatDate } from '../format'
 
 export function VodDetailPage() {
   const { id = '' } = useParams()
+  /** `undefined` while loading, `null` for a VOD that does not exist. */
   const [vod, setVod] = useState<Vod | null>()
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [failedStreamUrl, setFailedStreamUrl] = useState<string>()
 
   useEffect(() => {
     let active = true
-    getVod(id).then((found) => {
-      if (active) setVod(found)
-    })
+    setVod(undefined)
+    setLoadError(null)
+    getVod(id).then(
+      (found) => {
+        if (active) setVod(found)
+      },
+      (error: unknown) => {
+        if (active) setLoadError(apiErrorMessage(error))
+      },
+    )
     return () => {
       active = false
     }
   }, [id])
+
+  if (loadError) return <LoadError message={loadError} />
 
   if (vod === undefined) return null
 
@@ -38,7 +50,7 @@ export function VodDetailPage() {
           role="alert"
           className="flex aspect-video w-full items-center justify-center rounded-lg bg-zinc-900 text-zinc-300"
         >
-          영상을 재생할 수 없습니다
+          다시보기를 재생할 수 없습니다
         </div>
       ) : (
         <video

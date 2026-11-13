@@ -1,6 +1,6 @@
 # 02: 상세 화면에서 VOD 재생
 
-**What to build:** Clicking a VOD card opens `/vods/:id`. The page shows the title, description and registration date, and plays the 영상 파일 in a native `<video controls>` player. Playback starts without downloading the whole file, and the viewer can seek anywhere. This uses progressive MP4 over HTTP Range, with no HLS (see ADR-0001). An unknown id shows a not-found view. A video that fails to play shows "영상을 재생할 수 없습니다" in place of the player.
+**What to build:** Clicking a VOD card opens `/vods/:id`. The page shows the title, description and registration date, and plays the 영상 파일 in a native `<video controls>` player. Playback starts without downloading the whole file, and the viewer can seek anywhere. This uses progressive MP4 over HTTP Range, with no HLS (see ADR-0001). An unknown id shows a not-found view. A video that fails to play shows "다시보기를 재생할 수 없습니다" in place of the player.
 
 **Blocked by:** 01 (VOD 등록 후 목록에 보이기)
 

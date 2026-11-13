@@ -24,7 +24,7 @@ Status: ready-for-agent
 10. As a 시청자, I want to seek to any point in the video, so that I can skip to the part I care about.
 11. As a 시청자, I want playback to start without waiting for the whole file to download, so that large recordings are watchable immediately.
 12. As a 시청자, I want a "not found" page when I open a VOD that doesn't exist, so that I know the link is wrong rather than broken.
-13. As a 시청자, I want a "영상을 재생할 수 없습니다" message when the video can't play, so that I'm not left staring at a black box.
+13. As a 시청자, I want a "다시보기를 재생할 수 없습니다" message when the video can't play, so that I'm not left staring at a black box.
 14. As a 시청자, I want VOD detail pages to have stable URLs, so that I can share or revisit a specific VOD.
 15. As a 등록자, I want to register a VOD without logging in, so that I can share a recording with no setup.
 16. As a 등록자, I want to pick an MP4 file from my computer, so that I can register a recording I already have.

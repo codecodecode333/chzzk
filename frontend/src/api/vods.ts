@@ -84,13 +84,21 @@ export function apiErrorMessage(error: unknown): string {
   return FALLBACK_ERROR_MESSAGE
 }
 
-/** Resolves to `null` when the VOD does not exist (404). */
+/** A VOD id as the server stores it: a positive 64-bit integer. */
+const VOD_ID = /^[1-9]\d{0,18}$/
+const MAX_VOD_ID = 2n ** 63n - 1n
+
+/**
+ * Resolves to `null` when there is no such VOD: an id that cannot be a VOD id, or a server 404.
+ * Any other failure rejects; show it with {@link apiErrorMessage}.
+ */
 export async function getVod(id: string): Promise<Vod | null> {
+  if (!VOD_ID.test(id) || BigInt(id) > MAX_VOD_ID) return null
   try {
-    const { data } = await client.get<Vod>(`/vods/${encodeURIComponent(id)}`)
+    const { data } = await client.get<Vod>(`/vods/${id}`)
     return data
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 404) return null
+    if (isAxiosError(error) && error.response?.status === 404) return null
     throw error
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { listVods, type Page, type VodSummary } from '../api/vods'
+import { apiErrorMessage, listVods, type Page, type VodSummary } from '../api/vods'
+import { LoadError } from './LoadError'
 import { formatDate } from '../format'
 
 /** The URL carries a one-based `?page=`; anything that is not a positive integer means the first page. */
@@ -11,27 +12,43 @@ function pageFromUrl(raw: string | null): number {
 
 export function VodListPage() {
   const [searchParams] = useSearchParams()
-  const currentPage = pageFromUrl(searchParams.get('page'))
-  const [page, setPage] = useState<Page<VodSummary> | null>(null)
+  const pageNumber = pageFromUrl(searchParams.get('page'))
+  const [vods, setVods] = useState<Page<VodSummary> | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
-    listVods(currentPage - 1).then((result) => {
-      if (active) setPage(result)
-    })
+    setLoadError(null)
+    listVods(pageNumber - 1).then(
+      (result) => {
+        if (active) setVods(result)
+      },
+      (error: unknown) => {
+        if (active) setLoadError(apiErrorMessage(error))
+      },
+    )
     return () => {
       active = false
     }
-  }, [currentPage])
+  }, [pageNumber])
+
+  if (loadError) {
+    return (
+      <section>
+        <h1 className="mb-4 text-2xl font-bold">다시보기</h1>
+        <LoadError message={loadError} />
+      </section>
+    )
+  }
 
   return (
     <section>
       <h1 className="mb-4 text-2xl font-bold">다시보기</h1>
-      {page && page.totalElements === 0 ? (
+      {vods && vods.totalElements === 0 ? (
         <EmptyState />
       ) : (
         <>
-          {page && page.content.length === 0 && (
+          {vods && vods.content.length === 0 && (
             <p className="py-16 text-center text-zinc-400">
               이 페이지에는 다시보기가 없습니다.{' '}
               <Link to="/" className="text-emerald-400 underline">
@@ -40,7 +57,7 @@ export function VodListPage() {
             </p>
           )}
           <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {page?.content.map((vod) => (
+            {vods?.content.map((vod) => (
               <li key={vod.id}>
                 <Link
                   to={`/vods/${vod.id}`}
@@ -59,7 +76,7 @@ export function VodListPage() {
               </li>
             ))}
           </ul>
-          {page && page.totalPages > 1 && <Pagination current={currentPage} total={page.totalPages} />}
+          {vods && vods.totalPages > 1 && <Pagination current={pageNumber} total={vods.totalPages} />}
         </>
       )}
     </section>
