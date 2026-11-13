@@ -4,6 +4,7 @@ import com.chzzk.vod.storage.VideoStorage;
 import com.chzzk.vod.storage.VideoStorage.StoredVideo;
 import java.io.InputStream;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -26,7 +27,8 @@ public class VodService {
     public Vod register(String title, String description, InputStream file, VideoFileMetadata metadata) {
         StoredVideo stored = storage.store(file);
         Vod vod = new Vod(title, description, storage.type(), stored.storageKey(),
-                metadata.originalFilename(), metadata.contentType(), stored.sizeBytes(), Instant.now());
+                metadata.originalFilename(), metadata.contentType(), stored.sizeBytes(),
+                Instant.now().truncatedTo(ChronoUnit.MICROS)); // match TIMESTAMPTZ precision
         return repository.save(vod);
     }
 
