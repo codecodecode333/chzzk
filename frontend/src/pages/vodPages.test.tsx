@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
@@ -78,5 +78,60 @@ describe('VOD registration page', () => {
     const card = await screen.findByRole('article')
     expect(card).toHaveTextContent('새 다시보기')
     expect(received).toEqual({ title: '새 다시보기', description: '설명입니다', fileName: 'clip.mp4' })
+  })
+})
+
+const detail = {
+  id: 3,
+  title: '상세 다시보기',
+  description: '상세 설명',
+  createdAt: '2026-11-10T10:00:00Z',
+  streamUrl: '/api/vods/3/stream',
+}
+
+describe('VOD detail page', () => {
+  it('opens from a list card and plays the stream with title, description and date', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get('/api/vods', () => HttpResponse.json(pageOf([detail]))),
+      http.get('/api/vods/3', () => HttpResponse.json(detail)),
+    )
+
+    renderAt('/')
+    await user.click(await screen.findByRole('link', { name: /상세 다시보기/ }))
+
+    expect(await screen.findByRole('heading', { name: '상세 다시보기' })).toBeInTheDocument()
+    expect(screen.getByText('상세 설명')).toBeInTheDocument()
+    expect(screen.getByText('2026. 11. 10.')).toBeInTheDocument()
+    const video = screen.getByTestId('vod-player')
+    expect(video).toHaveAttribute('src', '/api/vods/3/stream')
+    expect(video).toHaveAttribute('controls')
+  })
+
+  it('shows the not-found view for an unknown id', async () => {
+    server.use(
+      http.get('/api/vods/404', () =>
+        HttpResponse.json(
+          { type: 'about:blank', title: 'Not Found', status: 404, detail: 'VOD 404 not found' },
+          { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    )
+
+    renderAt('/vods/404')
+
+    expect(await screen.findByRole('heading', { name: '다시보기를 찾을 수 없습니다' })).toBeInTheDocument()
+    expect(screen.queryByTestId('vod-player')).not.toBeInTheDocument()
+  })
+
+  it('replaces the player with an error message when the video fails to play', async () => {
+    server.use(http.get('/api/vods/3', () => HttpResponse.json(detail)))
+
+    renderAt('/vods/3')
+    fireEvent.error(await screen.findByTestId('vod-player'))
+
+    expect(await screen.findByText('영상을 재생할 수 없습니다')).toBeInTheDocument()
+    expect(screen.queryByTestId('vod-player')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '상세 다시보기' })).toBeInTheDocument()
   })
 })

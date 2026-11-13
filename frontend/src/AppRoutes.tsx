@@ -1,5 +1,6 @@
 import { Link, Route, Routes } from 'react-router'
 import { RegisterVodPage } from './pages/RegisterVodPage'
+import { VodDetailPage } from './pages/VodDetailPage'
 import { VodListPage } from './pages/VodListPage'
 
 export function AppRoutes() {
@@ -22,6 +23,7 @@ export function AppRoutes() {
         <Routes>
           <Route path="/" element={<VodListPage />} />
           <Route path="/vods/new" element={<RegisterVodPage />} />
+          <Route path="/vods/:id" element={<VodDetailPage />} />
         </Routes>
       </main>
     </div>

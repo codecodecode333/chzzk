@@ -1,0 +1,60 @@
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router'
+import { getVod, type Vod } from '../api/vods'
+import { formatDate } from '../format'
+
+export function VodDetailPage() {
+  const { id = '' } = useParams()
+  const [vod, setVod] = useState<Vod | null>()
+  const [failedStreamUrl, setFailedStreamUrl] = useState<string>()
+
+  useEffect(() => {
+    let active = true
+    getVod(id).then((found) => {
+      if (active) setVod(found)
+    })
+    return () => {
+      active = false
+    }
+  }, [id])
+
+  if (vod === undefined) return null
+
+  if (vod === null) {
+    return (
+      <section className="py-16 text-center">
+        <h1 className="text-2xl font-bold">다시보기를 찾을 수 없습니다</h1>
+        <Link to="/" className="mt-4 inline-block text-emerald-400 hover:underline">
+          목록으로 돌아가기
+        </Link>
+      </section>
+    )
+  }
+
+  return (
+    <article className="mx-auto max-w-4xl">
+      {failedStreamUrl === vod.streamUrl ? (
+        <div
+          role="alert"
+          className="flex aspect-video w-full items-center justify-center rounded-lg bg-zinc-900 text-zinc-300"
+        >
+          영상을 재생할 수 없습니다
+        </div>
+      ) : (
+        <video
+          data-testid="vod-player"
+          src={vod.streamUrl}
+          controls
+          preload="metadata"
+          onError={() => setFailedStreamUrl(vod.streamUrl)}
+          className="aspect-video w-full rounded-lg bg-black"
+        />
+      )}
+      <h1 className="mt-4 text-2xl font-bold">{vod.title}</h1>
+      <time dateTime={vod.createdAt} className="text-sm text-zinc-400">
+        {formatDate(vod.createdAt)}
+      </time>
+      {vod.description && <p className="mt-4 whitespace-pre-wrap text-zinc-300">{vod.description}</p>}
+    </article>
+  )
+}

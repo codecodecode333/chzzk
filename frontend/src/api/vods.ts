@@ -50,3 +50,14 @@ export async function registerVod(input: RegisterVodInput): Promise<Vod> {
   const { data } = await client.post<Vod>('/vods', form)
   return data
 }
+
+/** Resolves to `null` when the VOD does not exist (404). */
+export async function getVod(id: string): Promise<Vod | null> {
+  try {
+    const { data } = await client.get<Vod>(`/vods/${encodeURIComponent(id)}`)
+    return data
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) return null
+    throw error
+  }
+}
