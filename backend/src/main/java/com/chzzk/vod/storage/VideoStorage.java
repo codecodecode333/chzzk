@@ -9,10 +9,7 @@ import org.springframework.core.io.Resource;
  */
 public interface VideoStorage {
 
-    /** The {@code storage_type} recorded alongside keys produced by this implementation. */
-    StorageType type();
-
-    /** Stores the stream under a newly generated key and returns that key. */
+    /** Stores the stream under a newly generated key and returns where it went. */
     StoredVideo store(InputStream content);
 
     /** Opens the stored file; the resource reports its length via {@link Resource#contentLength()}. */
@@ -21,5 +18,6 @@ public interface VideoStorage {
     /** Deletes the stored file; a missing file is not an error. */
     void delete(String storageKey);
 
-    record StoredVideo(String storageKey, long sizeBytes) {}
+    /** Where a stored 영상 파일 lives ({@code storageType} + {@code storageKey}) and how big it is. */
+    record StoredVideo(StorageType storageType, String storageKey, long sizeBytes) {}
 }

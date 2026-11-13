@@ -1,4 +1,4 @@
-package com.chzzk.vod.vod;
+package com.chzzk.vod.domain;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 

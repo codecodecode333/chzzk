@@ -9,17 +9,20 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
-  servlet:
-    multipart:
-      # The 영상 파일 limit is enforced while parsing the multipart request, before anything is stored.
-      max-file-size: ${vod.upload.max-file-size}
-      max-request-size: ${VOD_MAX_REQUEST_SIZE:1100MB}
   mvc:
     problemdetails:
       enabled: true
 
+server:
+  tomcat:
+    # After rejecting an oversize upload (413), keep reading and discarding up to this much of the rest of the
+    # body so the browser receives the 413 instead of a connection reset (Tomcat's default is only 2MB).
+    # Tomcat caps this at Integer.MAX_VALUE bytes. The form's own size check stays the primary guard.
+    max-swallow-size: 2047MB
+
 vod:
   upload:
+    # Multipart limits are derived from this (see UploadLimits); keep frontend VITE_VOD_MAX_FILE_SIZE in sync.
     max-file-size: ${VOD_MAX_FILE_SIZE:1GB}
   storage:
     local:

@@ -3,6 +3,7 @@ package com.chzzk.vod;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -13,7 +14,14 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import java.net.Socket;
+import java.time.Duration;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,7 +47,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /** HTTP API seam: full Spring context against Testcontainers PostgreSQL. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
+@ExtendWith(OutputCaptureExtension.class)
 class VodApiTest {
+
+    static final String CRLF = "\r\n";
+
+    @LocalServerPort
+    int port;
 
     @Container
     @ServiceConnection
@@ -349,10 +363,126 @@ class VodApiTest {
 
     @Test
     void fileOverTheConfiguredMaxSizeIsRejectedButExactlyTheMaxIsAccepted() {
-        assertProblem(register("제목", null, "big.mp4", mp4BytesOfSize(MAX_FILE_SIZE_BYTES + 1)),
-                HttpStatus.PAYLOAD_TOO_LARGE);
+        ResponseEntity<Map<String, Object>> tooBig = register("제목", null, "big.mp4", mp4BytesOfSize(MAX_FILE_SIZE_BYTES + 1));
+
+        assertProblem(tooBig, HttpStatus.PAYLOAD_TOO_LARGE);
+        assertThat(tooBig.getBody()).containsEntry("detail", "영상 파일은 16KB 이하만 등록할 수 있습니다.");
         assertThat(register("제목", null, "max.mp4", mp4BytesOfSize(MAX_FILE_SIZE_BYTES)).getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void requestFarBeyondTheConfiguredFileLimitStillGetsTheProblemResponse() {
+        // Several MB more than the limit: the server must read past the rejected body so the 413 reaches the client.
+        ResponseEntity<Map<String, Object>> response =
+                register("제목", null, "huge.mp4", mp4BytesOfSize(8 * 1024 * 1024));
+
+        assertProblem(response, HttpStatus.PAYLOAD_TOO_LARGE);
+    }
+
+    @Test
+    void requestSizeLimitFollowsTheConfiguredFileLimit() {
+        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+        form.add("title", "제목");
+        form.add("file", new ByteArrayResource(mp4Bytes()) {
+            @Override
+            public String getFilename() {
+                return "clip.mp4";
+            }
+        });
+        // Every part is under the file limit, but together they are far above it plus headroom
+        // (Tomcat's default max-part-count is 10).
+        String filler = "x".repeat(MAX_FILE_SIZE_BYTES - 1024);
+        for (int i = 0; i < 8; i++) {
+            form.add("filler" + i, filler);
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+        ResponseEntity<Map<String, Object>> response = http.exchange("/api/vods", HttpMethod.POST,
+                new HttpEntity<>(form, headers), new ParameterizedTypeReference<>() {});
+
+        assertProblem(response, HttpStatus.PAYLOAD_TOO_LARGE);
+        assertThat(response.getBody()).containsEntry("detail", "영상 파일은 16KB 이하만 등록할 수 있습니다.");
+    }
+
+    @Test
+    void titleOfOnlyNonBreakingAndIdeographicSpacesIsRejected() {
+        // Same whitespace as the browser's String.prototype.trim(), which the form validates with.
+        ResponseEntity<Map<String, Object>> response =
+                register("\u00A0\u3000\uFEFF\u2007", null, "clip.mp4", mp4Bytes());
+
+        assertProblem(response, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(response)).containsExactly("title");
+    }
+
+    @Test
+    void titleIsTrimmedOfNonBreakingSpaces() {
+        ResponseEntity<Map<String, Object>> created = register("\u00A0제목\u00A0", null, "clip.mp4", mp4Bytes());
+
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(created.getBody()).containsEntry("title", "제목");
+    }
+
+    @Test
+    void blankDescriptionIsStoredAsNoDescription() {
+        Object emptyId = register("빈 설명", "", "clip.mp4", mp4Bytes()).getBody().get("id");
+        Object blankId = register("공백 설명", "  \n\u00A0", "clip.mp4", mp4Bytes()).getBody().get("id");
+
+        assertThat(getJson("/api/vods/" + emptyId).getBody()).containsEntry("description", null);
+        assertThat(getJson("/api/vods/" + blankId).getBody()).containsEntry("description", null);
+    }
+
+    @Test
+    void clientDisconnectDuringStreamingIsNotLoggedAsAnError(CapturedOutput output) throws Exception {
+        Object id = register("끊김", null, "clip.mp4", mp4Bytes()).getBody().get("id");
+        Path stored;
+        try (Stream<Path> files = Files.walk(storageRoot)) {
+            stored = files.filter(Files::isRegularFile)
+                    .max(Comparator.comparing(VodApiTest::lastModified))
+                    .orElseThrow();
+        }
+        Files.write(stored, new byte[64 * 1024 * 1024]); // far more than socket buffers hold
+
+        try (Socket socket = new Socket("localhost", port)) {
+            socket.setReceiveBufferSize(1024);
+            socket.getOutputStream().write(("GET /api/vods/" + id + "/stream HTTP/1.1" + CRLF
+                            + "Host: localhost" + CRLF + CRLF)
+                    .getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            socket.getInputStream().readNBytes(1024); // the response has started
+            socket.setSoLinger(true, 0); // abort with RST, like a <video> seeking away
+        }
+
+        Awaitility.await().during(Duration.ofSeconds(2)).atMost(Duration.ofSeconds(3))
+                .until(() -> !output.getAll().contains("Unhandled API error"));
+    }
+
+    @Test
+    void clientAbortingAnUploadIsNotLoggedAsAnError(CapturedOutput output) throws Exception {
+        String boundary = "abort-boundary";
+        String head = "--" + boundary + CRLF
+                + "Content-Disposition: form-data; name=\"title\"" + CRLF + CRLF + "제목" + CRLF
+                + "--" + boundary + CRLF
+                + "Content-Disposition: form-data; name=\"file\"; filename=\"clip.mp4\"" + CRLF
+                + "Content-Type: video/mp4" + CRLF + CRLF;
+        byte[] partialBody = head.getBytes(StandardCharsets.UTF_8);
+
+        try (Socket socket = new Socket("localhost", port)) {
+            OutputStream out = socket.getOutputStream();
+            out.write(("POST /api/vods HTTP/1.1" + CRLF + "Host: localhost" + CRLF
+                    + "Content-Type: multipart/form-data; boundary=" + boundary + CRLF
+                    + "Content-Length: " + (partialBody.length + 10_000) + CRLF + CRLF)
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.write(partialBody);
+            out.write(mp4Bytes());
+            out.flush();
+            Thread.sleep(300); // let the server start reading the body
+            socket.setSoLinger(true, 0); // the viewer closed the tab mid-upload
+        }
+
+        Awaitility.await().during(Duration.ofSeconds(2)).atMost(Duration.ofSeconds(3))
+                .until(() -> !output.getAll().contains("Unhandled API error"));
     }
 
     @Test

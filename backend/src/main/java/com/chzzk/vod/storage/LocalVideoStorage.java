@@ -24,18 +24,13 @@ public class LocalVideoStorage implements VideoStorage {
     }
 
     @Override
-    public StorageType type() {
-        return StorageType.LOCAL;
-    }
-
-    @Override
     public StoredVideo store(InputStream content) {
         String key = PREFIX + UUID.randomUUID() + ".mp4";
         Path target = resolve(key);
         try {
             Files.createDirectories(target.getParent());
             long size = Files.copy(content, target);
-            return new StoredVideo(key, size);
+            return new StoredVideo(StorageType.LOCAL, key, size);
         } catch (IOException e) {
             deleteQuietly(target);
             throw new UncheckedIOException("Failed to store video file", e);

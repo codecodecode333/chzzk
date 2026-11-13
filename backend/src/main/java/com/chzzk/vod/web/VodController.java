@@ -1,8 +1,8 @@
 package com.chzzk.vod.web;
 
-import com.chzzk.vod.vod.Vod;
-import com.chzzk.vod.vod.VodService;
-import com.chzzk.vod.vod.VodService.VideoFileMetadata;
+import com.chzzk.vod.domain.Vod;
+import com.chzzk.vod.domain.VodService;
+import com.chzzk.vod.domain.VodService.VideoFileMetadata;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -13,9 +13,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/vods")
@@ -55,7 +54,12 @@ class VodController {
     }
 
     private static ResponseEntity<VodResponse> created(Vod vod) {
-        return ResponseEntity.created(URI.create("/api/vods/" + vod.getId())).body(VodResponse.of(vod));
+        return ResponseEntity.created(URI.create(vodPath(vod))).body(VodResponse.of(vod));
+    }
+
+    /** The VOD's resource path; the one place API URLs for a VOD are built. */
+    private static String vodPath(Vod vod) {
+        return "/api/vods/" + vod.getId();
     }
 
     @GetMapping
@@ -63,17 +67,12 @@ class VodController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) int size) {
         if (page < 0) {
-            throw badRequest("page must be 0 or greater");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page는 0 이상이어야 합니다.");
         }
         if (size < 1) {
-            throw badRequest("size must be 1 or greater");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size는 1 이상이어야 합니다.");
         }
         return PageResponse.of(vods.list(page, Math.min(size, MAX_PAGE_SIZE)).map(VodSummary::of));
-    }
-
-    private static ErrorResponseException badRequest(String detail) {
-        return new ErrorResponseException(HttpStatus.BAD_REQUEST,
-                ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail), null);
     }
 
     @GetMapping("/{id}")
@@ -91,15 +90,14 @@ class VodController {
         return ResponseEntity.ok().contentType(VIDEO_MP4).body(video);
     }
 
-    private static ErrorResponseException notFound(long id) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "VOD " + id + " not found");
-        return new ErrorResponseException(HttpStatus.NOT_FOUND, problem, null);
+    private static ResponseStatusException notFound(long id) {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, id + "번 다시보기를 찾을 수 없습니다.");
     }
 
     record VodResponse(Long id, String title, String description, Instant createdAt, String streamUrl) {
         static VodResponse of(Vod vod) {
             return new VodResponse(vod.getId(), vod.getTitle(), vod.getDescription(), vod.getCreatedAt(),
-                    "/api/vods/" + vod.getId() + "/stream");
+                    vodPath(vod) + "/stream");
         }
     }
 

@@ -1,4 +1,4 @@
-package com.chzzk.vod.vod;
+package com.chzzk.vod.domain;
 
 /** Registration input broke a rule; {@link #field()} names the offending form field. Maps to {@code 400}. */
 public class InvalidVodException extends RuntimeException {

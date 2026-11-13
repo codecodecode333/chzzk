@@ -1,6 +1,8 @@
-package com.chzzk.vod.vod;
+package com.chzzk.vod.domain;
 
+import com.chzzk.vod.domain.VodService.VideoFileMetadata;
 import com.chzzk.vod.storage.StorageType;
+import com.chzzk.vod.storage.VideoStorage.StoredVideo;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -46,15 +48,14 @@ public class Vod {
 
     protected Vod() {}
 
-    Vod(String title, String description, StorageType storageType, String storageKey,
-            String originalFilename, String contentType, long sizeBytes, Instant createdAt) {
+    Vod(String title, String description, StoredVideo video, VideoFileMetadata metadata, Instant createdAt) {
         this.title = title;
         this.description = description;
-        this.storageType = storageType;
-        this.storageKey = storageKey;
-        this.originalFilename = originalFilename;
-        this.contentType = contentType;
-        this.sizeBytes = sizeBytes;
+        this.storageType = video.storageType();
+        this.storageKey = video.storageKey();
+        this.sizeBytes = video.sizeBytes();
+        this.originalFilename = metadata.originalFilename();
+        this.contentType = metadata.contentType();
         this.createdAt = createdAt;
     }
 

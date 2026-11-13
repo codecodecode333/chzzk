@@ -1,4 +1,4 @@
-package com.chzzk.vod.vod;
+package com.chzzk.vod.domain;
 
 import com.chzzk.vod.storage.VideoStorage;
 import com.chzzk.vod.storage.VideoStorage.StoredVideo;
@@ -39,12 +39,15 @@ public class VodService {
 
     /** @param file the 영상 파일 bytes, or {@code null} when no (or an empty) file was sent */
     public Vod register(String title, String description, InputStream file, VideoFileMetadata metadata) {
-        title = title == null ? "" : title.strip();
+        title = title == null ? "" : trimWhitespace(title);
         if (title.isEmpty()) {
             throw new InvalidVodException("title", "제목을 입력해 주세요.");
         }
         if (charCount(title) > TITLE_MAX_CHARS) {
             throw new InvalidVodException("title", "제목은 " + TITLE_MAX_CHARS + "자 이하로 입력해 주세요.");
+        }
+        if (description != null && trimWhitespace(description).isEmpty()) {
+            description = null; // a blank description is no description
         }
         if (description != null && charCount(description) > DESCRIPTION_MAX_CHARS) {
             throw new InvalidVodException("description", String.format(Locale.ROOT, "설명은 %,d자 이하로 입력해 주세요.", DESCRIPTION_MAX_CHARS));
@@ -62,8 +65,7 @@ public class VodService {
         }
 
         StoredVideo stored = storage.store(content);
-        Vod vod = new Vod(title, description, storage.type(), stored.storageKey(),
-                metadata.originalFilename(), metadata.contentType(), stored.sizeBytes(),
+        Vod vod = new Vod(title, description, stored, metadata,
                 Instant.now().truncatedTo(ChronoUnit.MICROS)); // match TIMESTAMPTZ precision
         try {
             return repository.save(vod);
@@ -93,6 +95,27 @@ public class VodService {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read video file", e);
         }
+    }
+
+    /**
+     * Trims whitespace exactly as JavaScript's {@code String.prototype.trim()} does, which the registration form
+     * validates with, so a title the form rejects (e.g. only NBSPs) is rejected here too. Java's {@code strip()}
+     * differs: it keeps NBSP/U+FEFF and removes U+001C..U+001F.
+     */
+    static String trimWhitespace(String s) {
+        int start = 0;
+        int end = s.length();
+        while (start < end && isJsWhitespace(s.charAt(start))) start++;
+        while (end > start && isJsWhitespace(s.charAt(end - 1))) end--;
+        return s.substring(start, end);
+    }
+
+    /** ECMAScript WhiteSpace and LineTerminator code points (all in the BMP). */
+    private static boolean isJsWhitespace(char c) {
+        return switch (c) {
+            case '\t', '\n', '\u000B', '\f', '\r', ' ', ' ', ' ', ' ', '﻿' -> true;
+            default -> Character.getType(c) == Character.SPACE_SEPARATOR;
+        };
     }
 
     /** Characters as PostgreSQL VARCHAR counts them (code points), so an emoji is one char. */
