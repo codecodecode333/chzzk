@@ -10,7 +10,8 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  # WebRTC relay for 라이브 (ADR-0002). LAN_IP (this PC's Wi-Fi/LAN address) goes in a .env next to this file.
+  # WebRTC relay for 라이브 (ADR-0002). LAN_IP (this PC's Wi-Fi/LAN address) and MEDIAMTX_AUTH_SECRET go in a .env
+  # next to this file (see .env.example).
   mediamtx:
     image: bluenviron/mediamtx:1.21.3
     command: ["/mediamtx.yml"]
@@ -18,9 +19,14 @@ services:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
     environment:
       MTX_WEBRTCADDITIONALHOSTS: ${LAN_IP:-127.0.0.1}  # phones need the real LAN IP (README)
+      # The backend refuses auth callbacks that don't carry this shared secret (README). MediaMTX can't add headers,
+      # so it goes in the callback URL's query.
+      MTX_AUTHHTTPADDRESS: http://host.docker.internal:8080/internal/mediamtx/auth?secret=${MEDIAMTX_AUTH_SECRET:-}
     ports:
-      - "8889:8889"            # WHIP/WHEP signaling (proxied by Vite under /live)
-      - "8189:8189/udp"        # WebRTC media
+      # WHIP/WHEP signaling is plain HTTP and carries the 송출 키, so it is loopback only: phones reach it through
+      # the Vite HTTPS proxy (/live). Only the WebRTC media port must be reachable from the LAN.
+      - "127.0.0.1:8889:8889"
+      - "8189:8189/udp"        # WebRTC media (encrypted by WebRTC itself)
       - "127.0.0.1:9997:9997"  # control API, unauthenticated: loopback only
     extra_hosts:
       - "host.docker.internal:host-gateway"  # reach the backend on the host (built in on Docker Desktop)

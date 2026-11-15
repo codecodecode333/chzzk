@@ -39,29 +39,61 @@ The phone publishes and watches with WebRTC through MediaMTX (ADR-0002). Camera 
 self-signed certificate on all interfaces and proxies `/api` (backend) and `/live` (WHIP/WHEP signaling to MediaMTX);
 media flows directly between the device and MediaMTX over UDP 8189.
 
-1. Find this PC's LAN IP (`ipconfig`, the Wi-Fi/Ethernet adapter's IPv4 address, e.g. `192.168.0.23`) and put it in a
-   `.env` next to `compose.yaml` (see `.env.example`): `LAN_IP=192.168.0.23`. MediaMTX advertises it as its WebRTC
-   address; without it only a browser on this PC can connect (it defaults to `127.0.0.1`). Re-run
-   `docker compose up -d` after changing it.
-2. Allow inbound connections in the Windows firewall (PowerShell as administrator):
+1. Copy `.env.example` to `.env` next to `compose.yaml` and fill it in. Both `docker compose` and the backend
+   (`bootRun` from `backend/`) read it; re-run `docker compose up -d` and restart the backend after changing it.
+   - `LAN_IP`: this PC's LAN IP (`ipconfig`, the Wi-Fi/Ethernet adapter's IPv4 address, e.g. `192.168.0.23`).
+     MediaMTX advertises it as its WebRTC address; without it only a browser on this PC can connect (it defaults to
+     `127.0.0.1`).
+   - `MEDIAMTX_AUTH_SECRET`: a long random value (see `.env.example`). MediaMTX sends it to the backend's auth
+     callback; while it is unset the backend refuses every publish and watch (and logs a warning at startup).
+2. Allow inbound connections in the Windows firewall (PowerShell as administrator). Only the HTTPS page and WebRTC
+   media are reachable from the LAN: MediaMTX's signaling (8889) and control API (9997) listen on loopback only and
+   phones reach signaling through the Vite proxy, so the 송출 키 never crosses the network unencrypted.
    ```powershell
-   New-NetFirewallRule -DisplayName "chzzk dev" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5173,8889
+   New-NetFirewallRule -DisplayName "chzzk dev" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5173
    New-NetFirewallRule -DisplayName "chzzk dev media" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 8189
    ```
 3. Start everything (`docker compose up -d`, backend, `npm run dev`), open `https://<PC IP>:5173` on the phone and
    accept the certificate warning. `/broadcasts/new` is the 송출 screen; the "시청 링크" it shows is the 시청 screen.
 
-MediaMTX asks the backend's internal callback (`POST /internal/mediamtx/auth`, not proxied) on every WHIP/WHEP
-request: publishing needs the 방송's 송출 키 as `Authorization: Bearer`, and only a 방송 중 방송 can be published or
-watched. The backend reads MediaMTX's control API on `localhost:9997` (override with `MEDIAMTX_API_URL`).
+MediaMTX asks the backend's internal callback (`POST /internal/mediamtx/auth?secret=<MEDIAMTX_AUTH_SECRET>`, not
+proxied) on every WHIP/WHEP request: a call without the shared secret is refused (the backend listens on every
+interface, so anyone on the LAN could otherwise ask it), publishing needs the 방송's 송출 키 as `Authorization: Bearer`,
+and only a 방송 중 방송 can be published or watched. `compose.yaml` puts the secret into MediaMTX's callback address
+(`MTX_AUTHHTTPADDRESS`), since MediaMTX can't add headers. The backend reads MediaMTX's control API on `localhost:9997` (override with `MEDIAMTX_API_URL`).
 Every 10s the publishing monitor asks that API which 방송 are receiving media; a 방송 중 방송 with no media for
-over 60s (or that never sent any) is ended automatically.
+over 60s (or that never sent any) is ended automatically. While MediaMTX can't be asked, only 방송 that never sent
+any media are ended (for the others, silence can't be told from the outage).
 
-Manual check on a real phone (not automated: real WebRTC isn't run in the tests):
-- start a 방송, open the 시청 링크 on another device, switch the camera, then 방송 종료 → the viewer shows 종료;
-- open the 시청 링크 before pressing 방송 시작 → "송출 준비 중…", then playback starts on its own;
-- reload the 송출 screen while 방송 중 → "이어서 송출" continues the same 방송 (same link, same start time);
-- close the 송출 tab (or lock the phone) → the 방송 becomes 종료 within ~70s.
+### Real-phone checklist
+
+Real WebRTC through MediaMTX isn't run in the automated tests, so check it by hand on the same Wi-Fi before
+calling 라이브 done (ticket 07). Use two phones and a desktop browser; "list" is the 라이브 home (`/`).
+
+**A. Android Chrome as 송출자 → iPhone Safari and a desktop browser as 시청자**
+- [ ] On Android Chrome open `/broadcasts/new`, allow camera and microphone, enter a title, press 방송 시작: the
+      방송 중 badge and the 방송 경과 시간 timer appear.
+- [ ] Open the 시청 링크 on iPhone Safari and on the desktop: video plays muted with sub-second delay (wave a hand,
+      or show a stopwatch on the 송출 phone and compare).
+- [ ] Press "소리 켜기" on each 시청자: sound plays.
+- [ ] Switch the camera (전면 ↔ 후면) on the 송출 phone while live: the 시청자 picture switches without reconnecting
+      and the 방송 keeps its link and timer.
+- [ ] The list shows the 방송 under 방송 중 with the 방송 중 badge.
+- [ ] Press 방송 종료 and confirm: the 송출 phone shows 종료됨 and its camera turns off; every 시청자 switches to
+      "종료된 방송입니다"; the list shows it under 종료된 방송 with the 종료 badge and both its start and end time.
+
+**B. iPhone Safari as 송출자 → Android Chrome as 시청자**
+- [ ] The same flow as A with the roles swapped: start, sub-second playback, "소리 켜기", camera switch while live,
+      방송 종료 → "종료된 방송입니다", and the list's 방송 중 / 종료 badges.
+
+**C. Interruptions** (either phone as 송출자, the other as 시청자)
+- [ ] Open the 시청 링크 before pressing 방송 시작 on a just-started 방송, or while the 송출자 reconnects: the 시청자
+      shows "송출 준비 중…" and starts playing on its own once media flows.
+- [ ] Reload the 송출 page while live and press "이어서 송출" within 60s: the same 방송 continues (same 시청 링크, same
+      start time) and the 시청자 recover on their own.
+- [ ] Turn Wi-Fi off and on again on the 송출 phone: it shows "송출이 끊겼습니다"; "다시 연결" continues the same 방송.
+- [ ] Kill the 송출 tab (close it, or lock the phone): within about 70s the 방송 shows 종료 in the list and
+      "종료된 방송입니다" for the 시청자.
 
 ## Tests
 
@@ -73,9 +105,11 @@ cd frontend && npm test              # Page components: Vitest + Testing Library
 Conventions:
 - Backend tests go through HTTP only (`backend/src/test/.../VodApiTest.java`, `BroadcastApiTest.java`); video storage is rooted in a temp dir. 방송 tests replace the clock (`MutableClock`) and the media server gateway (`FakeMediaServerGateway`) via `BroadcastTestConfig`.
 - Frontend tests render routes via `AppRoutes` in a `MemoryRouter` and register MSW handlers per test (`src/test/server.ts`).
-- Backend packages: `com.chzzk` is the feature-neutral application root (`BackendApplication`). Each feature is a module beneath it (`com.chzzk.vod` with `domain/`, `storage/`, `web/`; `com.chzzk.broadcast` with `domain/`, `media/`, `web/`). Code shared by features lives in `com.chzzk.common` (e.g. `common.web`, `common.text` for the shared title trimming); features don't depend on each other.
-- 방송 status rules, the 송출 키, publish/read authorization and the 60s auto-end (`sweep`) live only in `broadcast.domain.BroadcastLifecycle`; `broadcast.PublishingMonitor` feeds it from the media server every 10s (API tests switch its schedule off with `broadcast.publishing-monitor.enabled=false` and call `check()` themselves). MediaMTX is reached only through `broadcast.media.MediaServerGateway` (`MediaMtxGateway`); `MediaPaths` is the one `broadcasts/{id}` mapping.
+- Backend packages: `com.chzzk` is the feature-neutral application root (`BackendApplication`). Each feature is a module beneath it (`com.chzzk.vod` with `domain/`, `storage/`, `web/`; `com.chzzk.broadcast` with `domain/`, `media/`, `web/`). Code shared by features lives in `com.chzzk.common` (e.g. `common.web`, `common.text.Title` for the shared title rule); features don't depend on each other.
+- 방송 status rules, the 송출 키 (`PublishKey`), publish/read authorization and the 60s auto-end (`sweep`) live only in `broadcast.domain.BroadcastLifecycle`; every 방송 중 → 종료 is a conditional update, so 방송 종료 and the auto-end can't both win; `broadcast.PublishingMonitor` feeds it from the media server every 10s (API tests switch its schedule off with `broadcast.publishing-monitor.enabled=false` and call `check()` themselves). MediaMTX is reached only through `broadcast.media.MediaServerGateway` (`MediaMtxGateway`); `MediaPaths` is the one `broadcasts/{id}` mapping.
 - Every API error is RFC 7807 Problem Details (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation, built with `common.web.Problems.fieldError`). `common.web.ApiProblemHandler` covers Spring's own exceptions and the 500 catch-all; each feature maps its domain exceptions in its own `@RestControllerAdvice` ordered `ApiProblemHandler.FEATURE_ORDER` (e.g. `vod.web.VodProblemHandler`). Throw `ResponseStatusException` or a mapped domain exception; don't hand-roll error bodies.
+  The one exception is MediaMTX's auth callback (`broadcast.web.MediaServerAuthController`): MediaMTX's contract wants
+  an empty 2xx to allow and any other status to deny, so it answers a bare `204`/`401` with no body.
 - Registration form rules live in `frontend/src/vods/validateVodForm.ts` (pure, mirrors the server), separate from how the form submits.
 - All frontend data access lives in `frontend/src/api/` (`vods.ts`, `broadcasts.ts`, shared `client.ts`); extend it rather than calling the network from pages.
 - Only `frontend/src/media/media.ts` touches the camera, `RTCPeerConnection` and WHIP/WHEP; pages call it and page tests `vi.mock` it (`src/pages/broadcastPages.test.tsx`).

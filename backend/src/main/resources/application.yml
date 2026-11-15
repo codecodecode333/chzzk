@@ -1,6 +1,10 @@
 spring:
   application:
     name: chzzk
+  config:
+    # The repo-root .env (KEY=VALUE, shared with docker compose; see .env.example) when run from backend/, so
+    # MEDIAMTX_AUTH_SECRET is set in one place. Real environment variables still win.
+    import: optional:file:../.env[.properties]
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/chzzk}
     username: ${DB_USERNAME:chzzk}
@@ -32,6 +36,9 @@ broadcast:
   media-server:
     # MediaMTX control API (compose.yaml binds it to loopback). Used to see who is publishing and to kick publishers.
     api-url: ${MEDIAMTX_API_URL:http://localhost:9997}
+    # Shared secret MediaMTX sends on every auth callback (?secret=, set in compose.yaml from the same .env value).
+    # Unset or blank: every callback is refused, so nothing can be published or watched.
+    auth-secret: ${MEDIAMTX_AUTH_SECRET:}
   publishing-monitor:
     # Polls the media server for who is publishing, then auto-ends 방송 silent for over 60s (PublishingMonitor).
     enabled: true

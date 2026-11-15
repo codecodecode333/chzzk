@@ -14,7 +14,8 @@ export default defineConfig({
       // WHIP/WHEP signaling to MediaMTX on the page's own origin (no mixed content, no CORS). Media itself goes
       // straight to MediaMTX over UDP 8189. The backend's /internal/** is deliberately not proxied.
       '/live': {
-        target: 'http://localhost:8889',
+        // 127.0.0.1, not localhost: compose publishes MediaMTX's signaling port on IPv4 loopback only.
+        target: 'http://127.0.0.1:8889',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/live/, ''),
         configure: (proxy) =>
