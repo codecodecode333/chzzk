@@ -1,6 +1,6 @@
 # 라이브 방송: 휴대폰으로 송출하고 목록에서 골라 시청
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem Statement
 

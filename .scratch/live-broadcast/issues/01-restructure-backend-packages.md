@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The application root package is feature-neutral, with VOD code in its own feature module beneath it
-- [ ] The shared Problem Details handler and generic web concerns are outside the VOD module and usable by future features
-- [ ] No API, schema, or UI behaviour changes; all existing backend and frontend tests pass unchanged (except package/import lines)
-- [ ] The README's conventions section reflects the new layout
+- [x] The application root package is feature-neutral, with VOD code in its own feature module beneath it
+- [x] The shared Problem Details handler and generic web concerns are outside the VOD module and usable by future features
+- [x] No API, schema, or UI behaviour changes; all existing backend and frontend tests pass unchanged (except package/import lines)
+- [x] The README's conventions section reflects the new layout

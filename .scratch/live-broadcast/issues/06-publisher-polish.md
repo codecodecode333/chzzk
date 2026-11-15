@@ -8,12 +8,12 @@
 
 **Blocked by:** 02 (휴대폰으로 방송 시작 → 링크로 시청)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A front/back camera switch is available on the preview and while live; switching while live replaces the outgoing video track without renegotiating a new 방송
-- [ ] The outgoing video requests 1280×720 at 30fps (as ideal constraints)
-- [ ] The publisher puts H.264 first via codec preferences when the browser supports it, and otherwise falls back silently
-- [ ] Inline title validation reuses the same rule and whitespace definition as the VOD form; start is blocked while invalid; the server still returns `400` for bad titles
-- [ ] Distinct messages for permission denied, no secure context, and missing WebRTC or `getUserMedia` support; start is disabled in each case
-- [ ] Frontend seam tests (media module mocked): camera switch calls the module while live; title validation messages and the blocked start; each failure message
-- [ ] An HTTP API seam test covers start with an invalid title → `400` (if not already covered)
+- [x] A front/back camera switch is available on the preview and while live; switching while live replaces the outgoing video track without renegotiating a new 방송
+- [x] The outgoing video requests 1280×720 at 30fps (as ideal constraints)
+- [x] The publisher puts H.264 first via codec preferences when the browser supports it, and otherwise falls back silently
+- [x] Inline title validation reuses the same rule and whitespace definition as the VOD form; start is blocked while invalid; the server still returns `400` for bad titles
+- [x] Distinct messages for permission denied, no secure context, and missing WebRTC or `getUserMedia` support; start is disabled in each case
+- [x] Frontend seam tests (media module mocked): camera switch calls the module while live; title validation messages and the blocked start; each failure message
+- [x] An HTTP API seam test covers start with an invalid title → `400` (if not already covered)
