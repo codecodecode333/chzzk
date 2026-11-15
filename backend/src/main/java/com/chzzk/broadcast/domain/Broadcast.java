@@ -63,4 +63,11 @@ public class Broadcast {
     }
 
     String getPublishKeyHash() { return publishKeyHash; }
+
+    /** 방송 중 → 종료; there is no way back. Ending an ended 방송 changes nothing. */
+    void end(Instant endedAt) {
+        if (!isLive()) return;
+        this.status = BroadcastStatus.ENDED;
+        this.endedAt = endedAt;
+    }
 }

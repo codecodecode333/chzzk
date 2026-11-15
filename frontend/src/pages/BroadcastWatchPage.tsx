@@ -1,35 +1,59 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiErrorMessage } from '../api/client'
 import { getBroadcast, type Broadcast } from '../api/broadcasts'
 import { LiveBadge } from '../broadcasts/LiveBadge'
-import { formatDate } from '../format'
+import { formatDateTime } from '../format'
 import { MediaError, watch } from '../media/media'
 import { LoadError } from './LoadError'
 
-/** 시청 screen (`/broadcasts/:id`). */
+/** How often the 시청 screen re-reads the 방송 status while it is 방송 중. */
+const STATUS_POLL_MS = 5000
+
+/**
+ * 시청 screen (`/broadcasts/:id`). While 방송 중 it polls the status every 5s, and right away when the WebRTC
+ * connection drops; once the 방송 is 종료 the player is torn down (stopping playback) and the ended view shows.
+ */
 export function BroadcastWatchPage() {
   const { id = '' } = useParams()
   /** `undefined` while loading, `null` for a 방송 that does not exist. */
   const [broadcast, setBroadcast] = useState<Broadcast | null>()
   const [loadError, setLoadError] = useState<string | null>(null)
+  /** Re-reads the 방송 status; replaced on every id change so a stale response never lands. */
+  const refreshRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     let active = true
-    getBroadcast(id).then(
-      (found) => {
-        if (!active) return
-        setLoadError(null)
-        setBroadcast(found)
-      },
-      (error: unknown) => {
-        if (active) setLoadError(apiErrorMessage(error))
-      },
-    )
+    let loaded = false
+    const refresh = () => {
+      getBroadcast(id).then(
+        (found) => {
+          if (!active) return
+          loaded = true
+          setLoadError(null)
+          setBroadcast(found)
+        },
+        (error: unknown) => {
+          // A failed poll keeps the last known state; only a failed first load replaces the page.
+          if (active && !loaded) setLoadError(apiErrorMessage(error))
+        },
+      )
+    }
+    refreshRef.current = refresh
+    refresh()
     return () => {
       active = false
     }
   }, [id])
+
+  const live = broadcast?.status === 'LIVE'
+  useEffect(() => {
+    if (!live) return
+    const timer = setInterval(() => refreshRef.current(), STATUS_POLL_MS)
+    return () => clearInterval(timer)
+  }, [live])
+
+  const refreshNow = useCallback(() => refreshRef.current(), [])
 
   if (loadError) return <LoadError message={loadError} />
 
@@ -48,8 +72,8 @@ export function BroadcastWatchPage() {
 
   return (
     <article className="mx-auto max-w-4xl">
-      {broadcast.whepUrl ? (
-        <LivePlayer whepUrl={broadcast.whepUrl} />
+      {live && broadcast.whepUrl ? (
+        <LivePlayer whepUrl={broadcast.whepUrl} onDisconnect={refreshNow} />
       ) : (
         <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-zinc-900 text-zinc-300">
           종료된 방송입니다
@@ -59,24 +83,36 @@ export function BroadcastWatchPage() {
         {broadcast.status === 'LIVE' && <LiveBadge />}
         <h1 className="text-2xl font-bold">{broadcast.title}</h1>
       </div>
-      <time dateTime={broadcast.startedAt} className="text-sm text-zinc-400">
-        {formatDate(broadcast.startedAt)}
-      </time>
+      <p className="flex gap-3 text-sm text-zinc-400">
+        <time dateTime={broadcast.startedAt}>시작 {formatDateTime(broadcast.startedAt)}</time>
+        {broadcast.endedAt && <time dateTime={broadcast.endedAt}>종료 {formatDateTime(broadcast.endedAt)}</time>}
+      </p>
     </article>
   )
 }
 
-/** Plays a 방송 over WHEP: autoplays muted (browsers block unmuted autoplay) with a 소리 켜기 overlay. */
-function LivePlayer({ whepUrl }: { whepUrl: string }) {
+/**
+ * Plays a 방송 over WHEP: autoplays muted (browsers block unmuted autoplay) with a 소리 켜기 overlay.
+ * Unmounting stops the playback. `onDisconnect` fires when the connection drops.
+ */
+function LivePlayer({ whepUrl, onDisconnect }: { whepUrl: string; onDisconnect: () => void }) {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [muted, setMuted] = useState(true)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const onDisconnectRef = useRef(onDisconnect)
+  useEffect(() => {
+    onDisconnectRef.current = onDisconnect
+  }, [onDisconnect])
 
   useEffect(() => {
     let active = true
     let stop: (() => void) | undefined
-    watch(whepUrl, {}).then(
+    watch(whepUrl, {
+      onDisconnect: () => {
+        if (active) onDisconnectRef.current()
+      },
+    }).then(
       (playback) => {
         if (!active) return playback.stop()
         stop = () => playback.stop()

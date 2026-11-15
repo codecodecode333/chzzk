@@ -14,11 +14,11 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -43,7 +43,7 @@ class BroadcastApiTest {
     MutableClock clock;
 
     @Autowired
-    JdbcTemplate jdbc;
+    FakeMediaServerGateway mediaServer;
 
     static final ParameterizedTypeReference<Map<String, Object>> JSON = new ParameterizedTypeReference<>() {};
 
@@ -89,13 +89,10 @@ class BroadcastApiTest {
         return HttpStatus.valueOf(response.getStatusCode().value());
     }
 
-    /**
-     * Test setup only: ends a 방송 directly in the database, standing in for the end API and auto-end that arrive in
-     * later tickets. Assertions still go through HTTP.
-     */
-    void endInDatabase(long id, Instant endedAt) {
-        jdbc.update("UPDATE broadcast SET status = 'ENDED', ended_at = ? WHERE id = ?",
-                java.sql.Timestamp.from(endedAt), id);
+    ResponseEntity<Map<String, Object>> end(Object id, String publishKey) {
+        HttpHeaders headers = new HttpHeaders();
+        if (publishKey != null) headers.setBearerAuth(publishKey);
+        return http.exchange("/api/broadcasts/" + id + "/end", HttpMethod.POST, new HttpEntity<>(headers), JSON);
     }
 
     static void assertProblem(ResponseEntity<Map<String, Object>> response, HttpStatus status) {
@@ -138,8 +135,10 @@ class BroadcastApiTest {
     @Test
     void endedBroadcastDetailHasNoWhepUrl() {
         clock.set(Instant.parse("2026-11-15T12:00:00Z"));
-        long id = startedId("끝난 방송");
-        endInDatabase(id, Instant.parse("2026-11-15T12:30:00Z"));
+        Map<String, Object> started = start("끝난 방송").getBody();
+        Object id = started.get("id");
+        clock.set(Instant.parse("2026-11-15T12:30:00Z"));
+        end(id, (String) started.get("publishKey"));
 
         ResponseEntity<Map<String, Object>> response = detail(id);
 
@@ -169,19 +168,74 @@ class BroadcastApiTest {
         assertThat(mediaServerAsks("publish", "broadcasts/987654321", key)).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(mediaServerAsks("publish", "elsewhere/" + id, key)).isEqualTo(HttpStatus.UNAUTHORIZED);
 
-        endInDatabase(id, clock.instant());
+        end(id, key);
         assertThat(mediaServerAsks("publish", "broadcasts/" + id, key)).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
     void mediaServerMayLetAnyoneWatchOnlyALiveBroadcast() {
-        long id = startedId("시청 권한");
+        Map<String, Object> started = start("시청 권한").getBody();
+        long id = ((Number) started.get("id")).longValue();
 
         assertThat(mediaServerAsks("read", "broadcasts/" + id, "")).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(mediaServerAsks("read", "broadcasts/987654321", "")).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(mediaServerAsks("playback", "broadcasts/" + id, "")).isEqualTo(HttpStatus.UNAUTHORIZED);
 
-        endInDatabase(id, clock.instant());
+        end(id, (String) started.get("publishKey"));
         assertThat(mediaServerAsks("read", "broadcasts/" + id, "")).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void endingWithThePublishKeyEndsTheBroadcastAndCutsThePublisher() {
+        clock.set(Instant.parse("2026-11-15T13:00:00Z"));
+        Map<String, Object> started = start("끝낼 방송").getBody();
+        long id = ((Number) started.get("id")).longValue();
+        mediaServer.startPublishing(id);
+        clock.set(Instant.parse("2026-11-15T13:42:00Z"));
+
+        ResponseEntity<Map<String, Object>> response = end(id, (String) started.get("publishKey"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(detail(id).getBody())
+                .containsEntry("status", "ENDED")
+                .containsEntry("endedAt", "2026-11-15T13:42:00Z")
+                .containsEntry("whepUrl", null);
+        assertThat(mediaServer.kicked()).contains(id);
+    }
+
+    @Test
+    void onlyThePublishKeyHolderCanEndABroadcast() {
+        long id = startedId("남이 못 끄는 방송");
+        String otherKey = (String) start("다른 방송").getBody().get("publishKey");
+
+        assertProblem(end(id, null), HttpStatus.UNAUTHORIZED);
+        assertProblem(end(id, otherKey), HttpStatus.UNAUTHORIZED);
+
+        assertThat(detail(id).getBody()).containsEntry("status", "LIVE");
+        assertThat(mediaServer.kicked()).doesNotContain(id);
+    }
+
+    @Test
+    void endingAnUnknownBroadcastIsProblemDetails404() {
+        String key = (String) start("아무 방송").getBody().get("publishKey");
+
+        assertProblem(end(987654321, key), HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void endingTwiceIsHarmless() {
+        clock.set(Instant.parse("2026-11-15T14:00:00Z"));
+        Map<String, Object> started = start("두 번 끄기").getBody();
+        Object id = started.get("id");
+        String key = (String) started.get("publishKey");
+        end(id, key);
+        clock.set(Instant.parse("2026-11-15T14:05:00Z"));
+
+        ResponseEntity<Map<String, Object>> again = end(id, key);
+
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(detail(id).getBody())
+                .containsEntry("status", "ENDED")
+                .containsEntry("endedAt", "2026-11-15T14:00:00Z");
     }
 }

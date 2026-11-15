@@ -51,3 +51,11 @@ export async function getBroadcast(id: string): Promise<Broadcast | null> {
     throw error
   }
 }
+
+/**
+ * "방송 종료" with the 송출 키. Ending an already-ended 방송 succeeds. Rejects with a Problem Details error
+ * (401 wrong key, 404 unknown 방송); show it with `apiErrorMessage`.
+ */
+export async function endBroadcast(id: number, publishKey: string): Promise<void> {
+  await client.post(`/broadcasts/${id}/end`, null, { headers: { Authorization: `Bearer ${publishKey}` } })
+}
