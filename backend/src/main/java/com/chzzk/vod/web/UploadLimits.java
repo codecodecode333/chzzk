@@ -10,7 +10,7 @@ import org.springframework.util.unit.DataSize;
 /**
  * Multipart limits derived from the one setting {@code vod.upload.max-file-size} ({@code VOD_MAX_FILE_SIZE}):
  * the whole request may be that plus {@link #REQUEST_HEADROOM} for the title, description and multipart framing.
- * Enforced while parsing, before anything is stored; oversize requests become a {@code 413} in {@link ApiProblemHandler}.
+ * Enforced while parsing, before anything is stored; oversize requests become a {@code 413} in {@link VodProblemHandler}.
  */
 @Configuration
 class UploadLimits {

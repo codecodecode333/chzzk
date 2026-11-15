@@ -42,6 +42,7 @@ cd frontend && npm test              # Page components: Vitest + Testing Library
 Conventions:
 - Backend tests go through HTTP only (`backend/src/test/.../VodApiTest.java`); video storage is rooted in a temp dir.
 - Frontend tests render routes via `AppRoutes` in a `MemoryRouter` and register MSW handlers per test (`src/test/server.ts`).
-- Every API error is RFC 7807 Problem Details from `ApiProblemHandler` (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation). Throw `ResponseStatusException` or a domain exception mapped there; don't hand-roll error bodies.
+- Backend packages: `com.chzzk` is the feature-neutral application root (`BackendApplication`). Each feature is a module beneath it (`com.chzzk.vod` with `domain/`, `storage/`, `web/`; 방송 goes next to it). Code shared by features lives in `com.chzzk.common` (e.g. `common.web`); features don't depend on each other.
+- Every API error is RFC 7807 Problem Details (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation, built with `common.web.Problems.fieldError`). `common.web.ApiProblemHandler` covers Spring's own exceptions and the 500 catch-all; each feature maps its domain exceptions in its own `@RestControllerAdvice` ordered `ApiProblemHandler.FEATURE_ORDER` (e.g. `vod.web.VodProblemHandler`). Throw `ResponseStatusException` or a mapped domain exception; don't hand-roll error bodies.
 - Registration form rules live in `frontend/src/vods/validateVodForm.ts` (pure, mirrors the server), separate from how the form submits.
 - All frontend data access lives in `frontend/src/api/vods.ts`; extend it rather than calling the network from pages.
