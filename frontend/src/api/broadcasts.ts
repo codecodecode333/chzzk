@@ -1,5 +1,5 @@
 import { isAxiosError } from 'axios'
-import { client } from './client'
+import { client, type Page } from './client'
 
 /**
  * The data-access module for the 방송 API. Pages call these functions only; extend this file when the API grows.
@@ -58,4 +58,27 @@ export async function getBroadcast(id: string): Promise<Broadcast | null> {
  */
 export async function endBroadcast(id: number, publishKey: string): Promise<void> {
   await client.post(`/broadcasts/${id}/end`, null, { headers: { Authorization: `Bearer ${publishKey}` } })
+}
+
+/** A card in the 방송 목록. */
+export interface BroadcastSummary {
+  id: number
+  title: string
+  status: BroadcastStatus
+  startedAt: string
+  endedAt: string | null
+}
+
+/**
+ * The 방송 목록 for one status: 방송 중 newest started first, 종료 most recently ended first.
+ * @param page zero-based page index, as the API counts it
+ * @param size page size; the server's default (20) when omitted, capped at 100
+ */
+export async function listBroadcasts(
+  status: BroadcastStatus,
+  page = 0,
+  size?: number,
+): Promise<Page<BroadcastSummary>> {
+  const { data } = await client.get<Page<BroadcastSummary>>('/broadcasts', { params: { status, page, size } })
+  return data
 }

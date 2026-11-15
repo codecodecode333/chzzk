@@ -5,9 +5,14 @@ export function formatDate(iso: string): string {
   return dateFormat.format(new Date(iso))
 }
 
-const dateTimeFormat = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul' })
+const dateTimeFormat = new Intl.DateTimeFormat('ko-KR', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  hourCycle: 'h23',
+  timeZone: 'Asia/Seoul',
+})
 
-/** A moment as shown on screen, e.g. "2026. 11. 15. 오후 7:42" (KST). */
+/** A moment as shown on screen, e.g. "2026. 11. 15. 19:00" (KST). */
 export function formatDateTime(iso: string): string {
   return dateTimeFormat.format(new Date(iso))
 }

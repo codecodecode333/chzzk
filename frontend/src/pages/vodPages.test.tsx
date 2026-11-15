@@ -31,7 +31,7 @@ describe('VOD list page', () => {
       ),
     )
 
-    renderAt('/')
+    renderAt('/vods')
 
     expect(screen.getByRole('heading', { name: '다시보기' })).toBeInTheDocument()
     const cards = await screen.findAllByRole('article')
@@ -59,7 +59,7 @@ describe('VOD list page', () => {
       }),
     )
 
-    renderAt('/?page=2')
+    renderAt('/vods?page=2')
 
     expect(await screen.findByRole('article')).toHaveTextContent('2쪽 다시보기')
     expect(requested).toEqual(['1'])
@@ -69,6 +69,7 @@ describe('VOD list page', () => {
     await user.click(within(pager).getByRole('link', { name: '다음' }))
 
     expect(await screen.findByText('3쪽 다시보기')).toBeInTheDocument()
+    expect(within(pager).getByRole('link', { name: '3' })).toHaveAttribute('href', '/vods?page=3')
     expect(within(pager).getByRole('link', { name: '3' })).toHaveAttribute('aria-current', 'page')
     expect(within(pager).queryByRole('link', { name: '다음' })).not.toBeInTheDocument()
   })
@@ -76,7 +77,7 @@ describe('VOD list page', () => {
   it('shows the empty state with a register button when there are no VODs', async () => {
     server.use(http.get('/api/vods', () => HttpResponse.json(pageOf([]))))
 
-    renderAt('/')
+    renderAt('/vods')
 
     expect(await screen.findByText('아직 등록된 다시보기가 없습니다')).toBeInTheDocument()
     const main = screen.getByRole('main')
@@ -87,7 +88,7 @@ describe('VOD list page', () => {
   it('shows an error message instead of a blank page when the list cannot be loaded', async () => {
     server.use(http.get('/api/vods', () => HttpResponse.error()))
 
-    renderAt('/')
+    renderAt('/vods')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('잠시 후 다시 시도해 주세요.')
     expect(screen.queryByText('아직 등록된 다시보기가 없습니다')).not.toBeInTheDocument()
@@ -210,7 +211,7 @@ describe('VOD detail page', () => {
       http.get('/api/vods/3', () => HttpResponse.json(detail)),
     )
 
-    renderAt('/')
+    renderAt('/vods')
     await user.click(await screen.findByRole('link', { name: /상세 다시보기/ }))
 
     expect(await screen.findByRole('heading', { name: '상세 다시보기' })).toBeInTheDocument()

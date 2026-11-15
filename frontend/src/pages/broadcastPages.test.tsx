@@ -298,7 +298,7 @@ describe('시청 screen', () => {
       expect(screen.queryByTestId('live-player')).not.toBeInTheDocument()
       expect(stopWatching).toHaveBeenCalled()
       expect(screen.getByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
-      expect(screen.getByText(/종료 .*오후 7:42/)).toBeInTheDocument()
+      expect(screen.getByText(/종료 .*19:42/)).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }

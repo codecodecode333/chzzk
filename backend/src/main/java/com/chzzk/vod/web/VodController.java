@@ -1,5 +1,7 @@
 package com.chzzk.vod.web;
 
+import com.chzzk.common.web.PageResponse;
+import com.chzzk.common.web.Paging;
 import com.chzzk.vod.domain.Vod;
 import com.chzzk.vod.domain.VodService;
 import com.chzzk.vod.domain.VodService.VideoFileMetadata;
@@ -7,10 +9,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.time.Instant;
-import java.util.List;
 import java.util.Objects;
 import org.springframework.core.io.Resource;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -27,8 +27,6 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/vods")
 class VodController {
 
-    private static final int DEFAULT_PAGE_SIZE = 20;
-    private static final int MAX_PAGE_SIZE = 100;
     private static final MediaType VIDEO_MP4 = MediaType.parseMediaType("video/mp4");
 
     private final VodService vods;
@@ -65,14 +63,9 @@ class VodController {
     @GetMapping
     PageResponse<VodSummary> list(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) int size) {
-        if (page < 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page는 0 이상이어야 합니다.");
-        }
-        if (size < 1) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size는 1 이상이어야 합니다.");
-        }
-        return PageResponse.of(vods.list(page, Math.min(size, MAX_PAGE_SIZE)).map(VodSummary::of));
+            @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
+        Paging.PageParams params = Paging.of(page, size);
+        return PageResponse.of(vods.list(params.page(), params.size()).map(VodSummary::of));
     }
 
     @GetMapping("/{id}")
@@ -104,13 +97,6 @@ class VodController {
     record VodSummary(Long id, String title, Instant createdAt) {
         static VodSummary of(Vod vod) {
             return new VodSummary(vod.getId(), vod.getTitle(), vod.getCreatedAt());
-        }
-    }
-
-    record PageResponse<T>(List<T> content, int page, int size, long totalElements, int totalPages) {
-        static <T> PageResponse<T> of(Page<T> page) {
-            return new PageResponse<>(page.getContent(), page.getNumber(), page.getSize(),
-                    page.getTotalElements(), page.getTotalPages());
         }
     }
 }
