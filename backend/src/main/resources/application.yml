@@ -27,3 +27,8 @@ vod:
   storage:
     local:
       root: ${VOD_STORAGE_ROOT:./data}
+
+broadcast:
+  media-server:
+    # MediaMTX control API (compose.yaml binds it to loopback). Used to see who is publishing and to kick publishers.
+    api-url: ${MEDIAMTX_API_URL:http://localhost:9997}

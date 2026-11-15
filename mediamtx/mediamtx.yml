@@ -1,0 +1,40 @@
+# MediaMTX (ADR-0002): relays WebRTC from WHIP publishers to WHEP readers. Our backend owns 방송 state and the 송출 키.
+# The host's LAN IP comes from MTX_WEBRTCADDITIONALHOSTS (set from LAN_IP in compose.yaml).
+logLevel: info
+
+# Every publish/read asks the backend (running on the host) whether it is allowed.
+authMethod: http
+authHTTPAddress: http://host.docker.internal:8080/internal/mediamtx/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+# Control API: the backend polls it for who is publishing and kicks publishers. Unauthenticated, so compose binds
+# it to loopback only.
+api: true
+apiAddress: :9997
+
+metrics: false
+pprof: false
+playback: false
+rtsp: false
+rtmp: false
+hls: false
+srt: false
+moq: false
+
+webrtc: true
+webrtcAddress: :8889
+webrtcEncryption: false   # TLS is terminated by the Vite HTTPS dev server, which proxies /live here
+webrtcAllowOrigins: []    # same-origin through the proxy only
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: false  # don't advertise the container's own address
+webrtcAdditionalHosts: []       # set via MTX_WEBRTCADDITIONALHOSTS
+webrtcICEServers2: []
+
+paths:
+  # One path per 방송: broadcasts/{id}. Anything else is rejected before auth.
+  '~^broadcasts/[0-9]+$':
+    source: publisher

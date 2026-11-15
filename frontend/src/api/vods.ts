@@ -1,11 +1,12 @@
-import axios, { isAxiosError } from 'axios'
+import { isAxiosError } from 'axios'
+import { client, type Page } from './client'
+
+export { apiErrorMessage, type Page, type ProblemDetail } from './client'
 
 /**
- * The single data-access module for the VOD API. Pages call these functions only;
+ * The data-access module for the VOD API. Pages call these functions only;
  * extend this file (not the pages) when the API grows.
  */
-
-const client = axios.create({ baseURL: '/api' })
 
 export interface VodSummary {
   id: number
@@ -19,14 +20,6 @@ export interface Vod {
   description: string | null
   createdAt: string
   streamUrl: string
-}
-
-export interface Page<T> {
-  content: T[]
-  page: number
-  size: number
-  totalElements: number
-  totalPages: number
 }
 
 export interface RegisterVodInput {
@@ -62,28 +55,6 @@ export async function registerVod(input: RegisterVodInput, options: RegisterVodO
       : undefined,
   })
   return data
-}
-
-/** The server's RFC 7807 error body (one shape for every API error). */
-export interface ProblemDetail {
-  type: string
-  title: string
-  status: number
-  detail?: string
-  instance?: string
-  errors?: Array<{ field: string; message: string }>
-}
-
-// The server's message is the source of truth whenever a Problem body arrives; this copy of its generic 500 text
-// is deliberate, for failures that never reach the server (network down, connection reset, non-Problem body).
-const FALLBACK_ERROR_MESSAGE = '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
-
-/** A user-facing message for a failed API call: the Problem `detail` when the server sent one. */
-export function apiErrorMessage(error: unknown): string {
-  if (isAxiosError<Partial<ProblemDetail>>(error) && typeof error.response?.data?.detail === 'string') {
-    return error.response.data.detail
-  }
-  return FALLBACK_ERROR_MESSAGE
 }
 
 /** A VOD id as the server stores it: a positive 64-bit integer. */

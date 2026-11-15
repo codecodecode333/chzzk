@@ -10,5 +10,20 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  # WebRTC relay for 라이브 (ADR-0002). LAN_IP (this PC's Wi-Fi/LAN address) goes in a .env next to this file.
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.3
+    command: ["/mediamtx.yml"]
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    environment:
+      MTX_WEBRTCADDITIONALHOSTS: ${LAN_IP:-127.0.0.1}  # phones need the real LAN IP (README)
+    ports:
+      - "8889:8889"            # WHIP/WHEP signaling (proxied by Vite under /live)
+      - "8189:8189/udp"        # WebRTC media
+      - "127.0.0.1:9997:9997"  # control API, unauthenticated: loopback only
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach the backend on the host (built in on Docker Desktop)
+
 volumes:
   postgres-data:

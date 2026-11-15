@@ -1,4 +1,6 @@
 import { Link, Route, Routes } from 'react-router'
+import { BroadcastStudioPage } from './pages/BroadcastStudioPage'
+import { BroadcastWatchPage } from './pages/BroadcastWatchPage'
 import { RegisterVodPage } from './pages/RegisterVodPage'
 import { VodDetailPage } from './pages/VodDetailPage'
 import { VodListPage } from './pages/VodListPage'
@@ -24,6 +26,8 @@ export function AppRoutes() {
           <Route path="/" element={<VodListPage />} />
           <Route path="/vods/new" element={<RegisterVodPage />} />
           <Route path="/vods/:id" element={<VodDetailPage />} />
+          <Route path="/broadcasts/new" element={<BroadcastStudioPage />} />
+          <Route path="/broadcasts/:id" element={<BroadcastWatchPage />} />
         </Routes>
       </main>
     </div>
