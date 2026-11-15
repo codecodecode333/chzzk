@@ -9,7 +9,9 @@
 export type MediaErrorKind =
   /** The user (or the browser's settings) refused camera or microphone access. */
   | 'permission-denied'
-  /** No secure context (HTTPS) or no camera/WebRTC support in this browser. */
+  /** The page is not a secure context (HTTPS or localhost), so the browser hides the camera. */
+  | 'insecure-context'
+  /** This browser has no `getUserMedia` or no WebRTC (`RTCPeerConnection`). */
   | 'unsupported'
   /** Anything else while opening the camera (no device, device busy, ...). */
   | 'camera-failed'
@@ -50,21 +52,39 @@ const VIDEO_720P30: MediaTrackConstraints = {
   frameRate: { ideal: 30 },
 }
 
+/** Why this browser can't publish at all, or `null` when it can. */
+function publishBlocker(): MediaError | null {
+  if (typeof window === 'undefined' || !window.isSecureContext) {
+    return new MediaError('insecure-context', '보안 연결(HTTPS)이 아니어서 카메라를 사용할 수 없습니다.')
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
+    return new MediaError('unsupported', '이 브라우저는 실시간 송출을 지원하지 않습니다.')
+  }
+  return null
+}
+
 /** Whether this browser can publish at all (camera access needs a secure context). */
 export function canPublish(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    window.isSecureContext &&
-    !!navigator.mediaDevices?.getUserMedia &&
-    typeof RTCPeerConnection !== 'undefined'
-  )
+  return publishBlocker() === null
 }
+
+/** Which camera: the front (`user`) or the back (`environment`) one. */
+export type Facing = 'user' | 'environment'
+
+/** The result of {@link switchCamera}: the camera stream to preview from now on, and which camera it is. */
+export interface CameraSwitch {
+  stream: MediaStream
+  /** The requested camera, or the previous one if the requested one couldn't be opened. */
+  facing: Facing
+}
+
+/** The video sender of each running publish, so a camera switch can replace its track in place. */
+const publishedVideo = new WeakMap<Session, RTCRtpSender>()
 
 /** Opens the front camera (720p30 when possible) and the microphone. */
 export async function openCamera(): Promise<MediaStream> {
-  if (!canPublish()) {
-    throw new MediaError('unsupported', '이 브라우저에서는 송출할 수 없습니다. HTTPS로 접속했는지 확인해 주세요.')
-  }
+  const blocker = publishBlocker()
+  if (blocker) throw blocker
   try {
     return await navigator.mediaDevices.getUserMedia({
       audio: true,
@@ -77,6 +97,41 @@ export async function openCamera(): Promise<MediaStream> {
     }
     throw new MediaError('camera-failed', '카메라를 열지 못했습니다.')
   }
+}
+
+/**
+ * Switches the camera stream to the other camera, keeping its microphone. When the stream is being published, the
+ * running publication's outgoing video is replaced in place (no renegotiation, the same 방송 continues).
+ * If the requested camera can't be opened, the previous one is reopened and reported back in `facing`.
+ */
+export async function switchCamera(
+  stream: MediaStream,
+  facing: Facing,
+  publication: Session | null = null,
+): Promise<CameraSwitch> {
+  const previous: Facing = facing === 'user' ? 'environment' : 'user'
+  // iOS allows only one active camera, so the current one is released before asking for the other.
+  stream.getVideoTracks().forEach((track) => track.stop())
+  let video: MediaStreamTrack
+  let opened = facing
+  try {
+    video = await openVideo(facing)
+  } catch {
+    try {
+      video = await openVideo(previous)
+      opened = previous
+    } catch {
+      throw new MediaError('camera-failed', '카메라를 열지 못했습니다.')
+    }
+  }
+  const sender = publication && publishedVideo.get(publication)
+  if (sender) await sender.replaceTrack(video)
+  return { stream: new MediaStream([...stream.getAudioTracks(), video]), facing: opened }
+}
+
+async function openVideo(facing: Facing): Promise<MediaStreamTrack> {
+  const camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, ...VIDEO_720P30 } })
+  return camera.getVideoTracks()[0]
 }
 
 /** Stops every track of a stream (releases the camera and microphone). */
@@ -95,10 +150,13 @@ export async function publish(
   try {
     const [video] = stream.getVideoTracks()
     const [audio] = stream.getAudioTracks()
-    if (video) preferH264(pc.addTransceiver(video, { direction: 'sendonly', streams: [stream] }))
+    const videoTransceiver = video ? pc.addTransceiver(video, { direction: 'sendonly', streams: [stream] }) : null
+    if (videoTransceiver) preferH264(videoTransceiver)
     if (audio) pc.addTransceiver(audio, { direction: 'sendonly', streams: [stream] })
     const resource = await signal(pc, whipUrl, `Bearer ${publishKey}`)
-    return session(pc, resource, options)
+    const publication = session(pc, resource, options)
+    if (videoTransceiver) publishedVideo.set(publication, videoTransceiver.sender)
+    return publication
   } catch (error) {
     pc.close()
     throw error
