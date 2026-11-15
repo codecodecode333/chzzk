@@ -39,6 +39,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  sessionStorage.clear()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
 })
@@ -238,6 +239,118 @@ describe('송출 screen', () => {
   })
 })
 
+describe('송출 screen after a reload', () => {
+  const started = {
+    id: 7,
+    title: '저녁 산책',
+    status: 'LIVE',
+    startedAt: '2026-11-15T10:00:00Z',
+    publishKey: 'the-publish-key',
+    whipUrl: '/live/broadcasts/7/whip',
+  }
+  const detail = { ...started, endedAt: null, whepUrl: '/live/broadcasts/7/whep', publishKey: undefined }
+
+  /** Starts a 방송 on a fresh 송출 screen, then leaves it as a reload would. */
+  async function startThenReload(onAfterStart?: () => Promise<void>) {
+    const user = userEvent.setup()
+    mocked.openCamera.mockResolvedValue(fakeStream)
+    mocked.publish.mockResolvedValue({ stop: vi.fn() })
+    server.use(http.post('/api/broadcasts', () => HttpResponse.json(started, { status: 201 })))
+    const first = renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+    await user.type(screen.getByLabelText('제목'), '저녁 산책')
+    await user.click(screen.getByRole('button', { name: '방송 시작' }))
+    await screen.findByText('방송 중')
+    await onAfterStart?.()
+    first.unmount()
+    mocked.publish.mockClear()
+    return user
+  }
+
+  it('offers 이어서 송출 for a 방송 still 방송 중 and republishes to that same 방송', async () => {
+    let starts = 0
+    const user = await startThenReload()
+    server.use(
+      http.post('/api/broadcasts', () => {
+        starts++
+        return HttpResponse.json(started, { status: 201 })
+      }),
+      http.get('/api/broadcasts/7', () => HttpResponse.json(detail)),
+    )
+
+    renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+    await user.click(await screen.findByRole('button', { name: '이어서 송출' }))
+
+    expect(await screen.findByText('방송 중')).toBeInTheDocument()
+    expect(mocked.publish).toHaveBeenCalledWith(fakeStream, '/live/broadcasts/7/whip', 'the-publish-key', expect.anything())
+    expect(screen.getByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /시청 링크/ })).toHaveAttribute('href', '/broadcasts/7')
+    expect(starts).toBe(0)
+  })
+
+  it('offers nothing for a stored 방송 that has ended, and a fresh start works', async () => {
+    const user = await startThenReload()
+    server.use(
+      http.get('/api/broadcasts/7', () =>
+        HttpResponse.json({ ...detail, status: 'ENDED', endedAt: '2026-11-15T10:01:00Z', whepUrl: null }),
+      ),
+    )
+
+    renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+
+    expect(await screen.findByRole('button', { name: '방송 시작' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '이어서 송출' })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('제목'), '새 방송')
+    expect(screen.getByRole('button', { name: '방송 시작' })).toBeEnabled()
+  })
+
+  it('offers nothing after the 방송 was ended from the 송출 screen', async () => {
+    vi.stubGlobal('confirm', () => true)
+    server.use(http.post('/api/broadcasts/7/end', () => new HttpResponse(null, { status: 204 })))
+    let detailRequests = 0
+    await startThenReload(async () => {
+      await userEvent.click(screen.getByRole('button', { name: '방송 종료' }))
+      await screen.findByText('종료됨')
+    })
+    server.use(
+      http.get('/api/broadcasts/7', () => {
+        detailRequests++
+        return HttpResponse.json(detail)
+      }),
+    )
+
+    renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+
+    expect(screen.getByRole('button', { name: '방송 시작' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '이어서 송출' })).not.toBeInTheDocument()
+    expect(detailRequests).toBe(0)
+  })
+
+  it('warns before leaving the page while 방송 중, and not before', async () => {
+    const leaving = () => {
+      const event = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+    const user = userEvent.setup()
+    mocked.openCamera.mockResolvedValue(fakeStream)
+    mocked.publish.mockResolvedValue({ stop: vi.fn() })
+    server.use(http.post('/api/broadcasts', () => HttpResponse.json(started, { status: 201 })))
+    renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+    expect(leaving()).toBe(false)
+
+    await user.type(screen.getByLabelText('제목'), '저녁 산책')
+    await user.click(screen.getByRole('button', { name: '방송 시작' }))
+    await screen.findByText('방송 중')
+
+    expect(leaving()).toBe(true)
+  })
+})
+
 describe('시청 screen', () => {
   it('connects to a 방송 중 방송, plays it muted and offers 소리 켜기', async () => {
     const user = userEvent.setup()
@@ -317,6 +430,59 @@ describe('시청 screen', () => {
     act(() => onDisconnect?.())
 
     expect(await screen.findByText('종료된 방송입니다')).toBeInTheDocument()
+  })
+
+  it('shows 송출 준비 중… while the connection fails and retries every 3 seconds until it plays', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const notYet = new media.MediaError('signaling-failed', 'no stream yet', 404)
+      mocked.watch
+        .mockRejectedValueOnce(notYet)
+        .mockRejectedValueOnce(notYet)
+        .mockResolvedValueOnce({ stream: fakeStream, stop: vi.fn() })
+      server.use(http.get('/api/broadcasts/7', () => HttpResponse.json(live)))
+
+      renderAt('/broadcasts/7')
+
+      expect(await screen.findByText('송출 준비 중…')).toBeInTheDocument()
+      expect(mocked.watch).toHaveBeenCalledTimes(1)
+
+      await act(() => vi.advanceTimersByTimeAsync(3000))
+      expect(mocked.watch).toHaveBeenCalledTimes(2)
+      expect(screen.getByText('송출 준비 중…')).toBeInTheDocument()
+
+      await act(() => vi.advanceTimersByTimeAsync(3000))
+      expect(await screen.findByRole('button', { name: '소리 켜기' })).toBeInTheDocument()
+      expect(mocked.watch).toHaveBeenCalledTimes(3)
+      expect(screen.queryByText('송출 준비 중…')).not.toBeInTheDocument()
+      expect((screen.getByTestId('live-player') as HTMLVideoElement).srcObject).toBe(fakeStream)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops retrying once the 방송 has ended', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mocked.watch.mockRejectedValue(new media.MediaError('signaling-failed', 'no stream yet', 404))
+      let current: object = live
+      server.use(http.get('/api/broadcasts/7', () => HttpResponse.json(current)))
+
+      renderAt('/broadcasts/7')
+      expect(await screen.findByText('송출 준비 중…')).toBeInTheDocument()
+
+      current = ended
+      await act(() => vi.advanceTimersByTimeAsync(5000))
+      expect(await screen.findByText('종료된 방송입니다')).toBeInTheDocument()
+      const attempts = mocked.watch.mock.calls.length
+
+      await act(() => vi.advanceTimersByTimeAsync(10000))
+
+      expect(mocked.watch).toHaveBeenCalledTimes(attempts)
+      expect(screen.queryByText('송출 준비 중…')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows an ended 방송 with its times and no player, without connecting', async () => {

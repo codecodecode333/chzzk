@@ -32,3 +32,7 @@ broadcast:
   media-server:
     # MediaMTX control API (compose.yaml binds it to loopback). Used to see who is publishing and to kick publishers.
     api-url: ${MEDIAMTX_API_URL:http://localhost:9997}
+  publishing-monitor:
+    # Polls the media server for who is publishing, then auto-ends 방송 silent for over 60s (PublishingMonitor).
+    enabled: true
+    interval: 10s

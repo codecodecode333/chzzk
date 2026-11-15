@@ -54,6 +54,14 @@ media flows directly between the device and MediaMTX over UDP 8189.
 MediaMTX asks the backend's internal callback (`POST /internal/mediamtx/auth`, not proxied) on every WHIP/WHEP
 request: publishing needs the 방송's 송출 키 as `Authorization: Bearer`, and only a 방송 중 방송 can be published or
 watched. The backend reads MediaMTX's control API on `localhost:9997` (override with `MEDIAMTX_API_URL`).
+Every 10s the publishing monitor asks that API which 방송 are receiving media; a 방송 중 방송 with no media for
+over 60s (or that never sent any) is ended automatically.
+
+Manual check on a real phone (not automated: real WebRTC isn't run in the tests):
+- start a 방송, open the 시청 링크 on another device, switch the camera, then 방송 종료 → the viewer shows 종료;
+- open the 시청 링크 before pressing 방송 시작 → "송출 준비 중…", then playback starts on its own;
+- reload the 송출 screen while 방송 중 → "이어서 송출" continues the same 방송 (same link, same start time);
+- close the 송출 tab (or lock the phone) → the 방송 becomes 종료 within ~70s.
 
 ## Tests
 
@@ -66,7 +74,7 @@ Conventions:
 - Backend tests go through HTTP only (`backend/src/test/.../VodApiTest.java`, `BroadcastApiTest.java`); video storage is rooted in a temp dir. 방송 tests replace the clock (`MutableClock`) and the media server gateway (`FakeMediaServerGateway`) via `BroadcastTestConfig`.
 - Frontend tests render routes via `AppRoutes` in a `MemoryRouter` and register MSW handlers per test (`src/test/server.ts`).
 - Backend packages: `com.chzzk` is the feature-neutral application root (`BackendApplication`). Each feature is a module beneath it (`com.chzzk.vod` with `domain/`, `storage/`, `web/`; `com.chzzk.broadcast` with `domain/`, `media/`, `web/`). Code shared by features lives in `com.chzzk.common` (e.g. `common.web`, `common.text` for the shared title trimming); features don't depend on each other.
-- 방송 status rules, the 송출 키 and publish/read authorization live only in `broadcast.domain.BroadcastLifecycle`. MediaMTX is reached only through `broadcast.media.MediaServerGateway` (`MediaMtxGateway`); `MediaPaths` is the one `broadcasts/{id}` mapping.
+- 방송 status rules, the 송출 키, publish/read authorization and the 60s auto-end (`sweep`) live only in `broadcast.domain.BroadcastLifecycle`; `broadcast.PublishingMonitor` feeds it from the media server every 10s (API tests switch its schedule off with `broadcast.publishing-monitor.enabled=false` and call `check()` themselves). MediaMTX is reached only through `broadcast.media.MediaServerGateway` (`MediaMtxGateway`); `MediaPaths` is the one `broadcasts/{id}` mapping.
 - Every API error is RFC 7807 Problem Details (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation, built with `common.web.Problems.fieldError`). `common.web.ApiProblemHandler` covers Spring's own exceptions and the 500 catch-all; each feature maps its domain exceptions in its own `@RestControllerAdvice` ordered `ApiProblemHandler.FEATURE_ORDER` (e.g. `vod.web.VodProblemHandler`). Throw `ResponseStatusException` or a mapped domain exception; don't hand-roll error bodies.
 - Registration form rules live in `frontend/src/vods/validateVodForm.ts` (pure, mirrors the server), separate from how the form submits.
 - All frontend data access lives in `frontend/src/api/` (`vods.ts`, `broadcasts.ts`, shared `client.ts`); extend it rather than calling the network from pages.

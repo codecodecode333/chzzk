@@ -28,7 +28,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * HTTP API seam for 방송: full Spring context against Testcontainers PostgreSQL, with the media server gateway faked
  * and the clock injectable (see {@link BroadcastTestConfig}).
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// The publishing monitor's schedule is off: tests run its checks by hand, with the clock where they want it.
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "broadcast.publishing-monitor.enabled=false")
 @Testcontainers
 @Import(BroadcastTestConfig.class)
 class BroadcastApiTest {
@@ -48,6 +50,9 @@ class BroadcastApiTest {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    PublishingMonitor publishingMonitor;
 
     static final ParameterizedTypeReference<Map<String, Object>> JSON = new ParameterizedTypeReference<>() {};
 
@@ -338,5 +343,80 @@ class BroadcastApiTest {
             assertThat(response.getStatusCode()).as(query).isEqualTo(HttpStatus.BAD_REQUEST);
             assertProblem(response, HttpStatus.BAD_REQUEST);
         }
+    }
+
+    /** One run of the publishing monitor (normally every 10s) at the given moment. */
+    void monitorChecksAt(Instant now) {
+        clock.set(now);
+        publishingMonitor.check();
+    }
+
+    @Test
+    void aPublishingBroadcastStaysLiveAsTimeAdvances() {
+        Instant start = Instant.parse("2026-11-15T15:00:00Z");
+        clock.set(start);
+        long id = startedId("오래 하는 방송");
+        mediaServer.startPublishing(id);
+
+        for (int second = 10; second <= 600; second += 10) {
+            monitorChecksAt(start.plusSeconds(second));
+        }
+
+        assertThat(detail(id).getBody()).containsEntry("status", "LIVE").containsEntry("endedAt", null);
+    }
+
+    @Test
+    void aBroadcastWhoseMediaStoppedEndsAfterMoreThan60SecondsAtItsLastPublishingTime() {
+        Instant start = Instant.parse("2026-11-15T16:00:00Z");
+        clock.set(start);
+        long id = startedId("끊긴 방송");
+        mediaServer.startPublishing(id);
+        monitorChecksAt(start.plusSeconds(10));
+        Instant lastSeen = start.plusSeconds(20);
+        monitorChecksAt(lastSeen);
+
+        mediaServer.stopPublishing(id);
+        for (int second = 30; second <= 80; second += 10) {
+            monitorChecksAt(start.plusSeconds(second));
+        }
+        assertThat(detail(id).getBody()).as("exactly 60s without media").containsEntry("status", "LIVE");
+
+        monitorChecksAt(start.plusSeconds(90));
+
+        assertThat(detail(id).getBody())
+                .containsEntry("status", "ENDED")
+                .containsEntry("endedAt", "2026-11-15T16:00:20Z")
+                .containsEntry("whepUrl", null);
+    }
+
+    @Test
+    void aBroadcastThatNeverPublishedEnds60SecondsAfterItStarted() {
+        Instant start = Instant.parse("2026-11-15T17:00:00Z");
+        clock.set(start);
+        long id = startedId("시작만 한 방송");
+
+        monitorChecksAt(start.plusSeconds(60));
+        assertThat(detail(id).getBody()).containsEntry("status", "LIVE");
+        monitorChecksAt(start.plusSeconds(61));
+
+        assertThat(detail(id).getBody())
+                .containsEntry("status", "ENDED")
+                .containsEntry("endedAt", "2026-11-15T17:00:00Z");
+    }
+
+    @Test
+    void nothingEndsWhileTheMediaServerCannotBeAsked() {
+        Instant start = Instant.parse("2026-11-15T18:00:00Z");
+        clock.set(start);
+        long id = startedId("미디어 서버 점검 중");
+        mediaServer.startPublishing(id);
+        mediaServer.becomeUnreachable();
+        try {
+            monitorChecksAt(start.plusSeconds(300));
+        } finally {
+            mediaServer.reset();
+        }
+
+        assertThat(detail(id).getBody()).containsEntry("status", "LIVE");
     }
 }

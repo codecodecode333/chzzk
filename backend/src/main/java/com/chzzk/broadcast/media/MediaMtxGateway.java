@@ -1,8 +1,10 @@
 package com.chzzk.broadcast.media;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -12,6 +14,11 @@ import org.springframework.web.client.RestClient;
 
 /**
  * {@link MediaServerGateway} over MediaMTX's control API ({@code /v3}, unauthenticated, bound to loopback in Compose).
+ *
+ * <p>A path counts as receiving media when it is {@code online} and its {@code inboundBytes} moved since the previous
+ * look. {@code online} alone stays true for ~25s after a publisher vanishes without hanging up (a closed tab, a dead
+ * phone) until MediaMTX's WebRTC session times out; the byte counter stops at once. A path seen for the first time
+ * counts as receiving.
  */
 @Component
 class MediaMtxGateway implements MediaServerGateway {
@@ -20,13 +27,17 @@ class MediaMtxGateway implements MediaServerGateway {
 
     private final RestClient api;
 
+    /** {@code inboundBytes} per online path at the previous {@link #listPublishingPaths} call. */
+    private Map<String, Long> previousInboundBytes = Map.of();
+
     MediaMtxGateway(RestClient.Builder builder, @Value("${broadcast.media-server.api-url}") String apiUrl) {
         this.api = builder.baseUrl(apiUrl).build();
     }
 
     @Override
-    public Set<Long> listPublishingPaths() {
+    public synchronized Set<Long> listPublishingPaths() {
         Set<Long> ids = new HashSet<>();
+        Map<String, Long> inboundBytes = new HashMap<>();
         int pageCount = 1;
         for (int page = 0; page < pageCount; page++) {
             PathList list = api.get()
@@ -36,9 +47,15 @@ class MediaMtxGateway implements MediaServerGateway {
             if (list == null || list.items() == null) break;
             pageCount = list.pageCount();
             for (PathItem item : list.items()) {
-                if (item.online()) MediaPaths.broadcastIdOf(item.name()).ifPresent(ids::add);
+                if (!item.online()) continue;
+                inboundBytes.put(item.name(), item.inboundBytes());
+                Long before = previousInboundBytes.get(item.name());
+                if (before == null || before != item.inboundBytes()) {
+                    MediaPaths.broadcastIdOf(item.name()).ifPresent(ids::add);
+                }
             }
         }
+        previousInboundBytes = inboundBytes;
         return ids;
     }
 
@@ -63,7 +80,7 @@ class MediaMtxGateway implements MediaServerGateway {
     record PathList(int pageCount, List<PathItem> items) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record PathItem(String name, boolean online, Source source) {}
+    record PathItem(String name, boolean online, long inboundBytes, Source source) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Source(String type, String id) {}

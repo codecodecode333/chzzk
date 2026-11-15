@@ -58,6 +58,11 @@ public class Broadcast {
     public Instant getEndedAt() { return endedAt; }
     public Instant getLastPublishingAt() { return lastPublishingAt; }
 
+    /** When media last arrived, or the start time if it never did: what the 60-second auto-end counts from. */
+    Instant getLastActiveAt() {
+        return lastPublishingAt != null ? lastPublishingAt : startedAt;
+    }
+
     public boolean isLive() {
         return status == BroadcastStatus.LIVE;
     }

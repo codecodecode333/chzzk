@@ -3,9 +3,12 @@ package com.chzzk.broadcast.domain;
 import com.chzzk.broadcast.media.MediaServerGateway;
 import com.chzzk.common.text.Text;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -19,12 +22,15 @@ import org.springframework.transaction.support.TransactionTemplate;
  * The broadcast lifecycle: the single owner of 방송 status rules, the 송출 키 and who may publish or read.
  *
  * <p>State lives only in the database, so it survives restarts. Time comes from the injected {@link Clock}.
- * Later additions belong here too: {@code sweep(now)} for the 60-second auto-end.
+ * The 60-second auto-end ({@link #sweep}) works the same way: it reads every 방송 중 방송 from the database.
  */
 @Service
 public class BroadcastLifecycle {
 
     static final int TITLE_MAX_CHARS = 100;
+
+    /** A 방송 중 방송 that receives no media for longer than this ends on its own. */
+    static final Duration AUTO_END_AFTER = Duration.ofSeconds(60);
 
     private static final Logger log = LoggerFactory.getLogger(BroadcastLifecycle.class);
 
@@ -100,6 +106,31 @@ public class BroadcastLifecycle {
         }
     }
 
+    /** Notes that media is arriving right now for these 방송 (ids of ended or unknown 방송 are ignored). */
+    @Transactional
+    public void recordPublishing(Set<Long> ids) {
+        if (ids.isEmpty()) return;
+        repository.recordPublishing(ids, BroadcastStatus.LIVE, now());
+    }
+
+    /**
+     * The auto-end: every 방송 중 방송 whose media last arrived more than 60s before {@code now} (or that started more
+     * than 60s ago and never sent any) becomes 종료, with {@code ended_at} = when its media stopped (the last
+     * publishing time, or the start time). Their publishers, if any reappeared meanwhile, are cut afterwards.
+     *
+     * @return the ids of the 방송 it ended
+     */
+    public List<Long> sweep(Instant now) {
+        Instant cutoff = now.minus(AUTO_END_AFTER);
+        List<Long> ended = transaction.execute(tx -> repository.findLiveSilentSince(BroadcastStatus.LIVE, cutoff)
+                .stream()
+                .peek(b -> b.end(b.getLastActiveAt()))
+                .map(Broadcast::getId)
+                .toList());
+        ended.forEach(this::kickPublisher);
+        return ended;
+    }
+
     /** 방송 중 newest started first; 종료 most recently ended first. */
     @Transactional(readOnly = true)
     public Page<Broadcast> list(BroadcastStatus status, int page, int size) {
@@ -125,7 +156,8 @@ public class BroadcastLifecycle {
         return repository.findById(id).filter(Broadcast::isLive).isPresent();
     }
 
-    private Instant now() {
+    /** Now, by the injected clock, at the database's precision. */
+    public Instant now() {
         return clock.instant().truncatedTo(ChronoUnit.MICROS); // match TIMESTAMPTZ precision
     }
 }

@@ -8,7 +8,7 @@ import java.util.Set;
  */
 public interface MediaServerGateway {
 
-    /** Ids of the 방송 whose media path is currently receiving media from a publisher. */
+    /** Ids of the 방송 whose media path is currently receiving media from a publisher (asked every 10s). */
     Set<Long> listPublishingPaths();
 
     /** Cuts the publisher's media connection to the 방송, if any; a 방송 with no publisher is a no-op. */
