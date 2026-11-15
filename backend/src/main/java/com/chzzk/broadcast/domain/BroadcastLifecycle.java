@@ -1,7 +1,7 @@
 package com.chzzk.broadcast.domain;
 
 import com.chzzk.broadcast.media.MediaServerGateway;
-import com.chzzk.common.text.Text;
+import com.chzzk.common.text.Title;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -27,10 +27,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class BroadcastLifecycle {
 
-    static final int TITLE_MAX_CHARS = 100;
-
     /** A 방송 중 방송 that receives no media for longer than this ends on its own. */
-    static final Duration AUTO_END_AFTER = Duration.ofSeconds(60);
+    public static final Duration AUTO_END_AFTER = Duration.ofSeconds(60);
 
     private static final Logger log = LoggerFactory.getLogger(BroadcastLifecycle.class);
 
@@ -48,20 +46,14 @@ public class BroadcastLifecycle {
     }
 
     /** A just-started 방송 and its 송출 키, which is handed out only this once. */
-    public record Started(Broadcast broadcast, String publishKey) {}
+    public record Started(Broadcast broadcast, PublishKey publishKey) {}
 
     /** "방송 시작": a new 방송 중 방송 with a fresh 송출 키. */
     @Transactional
     public Started start(String title) {
-        title = title == null ? "" : Text.trimWhitespace(title);
-        if (title.isEmpty()) {
-            throw new InvalidBroadcastException("title", "제목을 입력해 주세요.");
-        }
-        if (Text.charCount(title) > TITLE_MAX_CHARS) {
-            throw new InvalidBroadcastException("title", "제목은 " + TITLE_MAX_CHARS + "자 이하로 입력해 주세요.");
-        }
-        String publishKey = PublishKeys.generate();
-        Broadcast broadcast = repository.save(new Broadcast(title, PublishKeys.hash(publishKey), now()));
+        title = Title.normalize(title, message -> new InvalidBroadcastException("title", message));
+        PublishKey publishKey = PublishKey.generate();
+        Broadcast broadcast = repository.save(new Broadcast(title, publishKey.hash(), now()));
         return new Started(broadcast, publishKey);
     }
 
@@ -72,8 +64,10 @@ public class BroadcastLifecycle {
 
     /** How an {@link #end} request turned out. */
     public enum EndResult {
-        /** Ended now, or had already ended (ending twice is harmless). */
+        /** Ended now. */
         ENDED,
+        /** Had already ended (by the 송출자 or the auto-end); ending twice is harmless and changes nothing. */
+        ALREADY_ENDED,
         /** The 송출 키 is missing or belongs to another 방송; nothing changed. */
         WRONG_KEY,
         NOT_FOUND
@@ -83,15 +77,16 @@ public class BroadcastLifecycle {
      * "방송 종료" by the 송출자: 방송 중 → 종료 with {@code ended_at = now}, then the publisher's media connection is cut
      * (which also drops its viewers). Only the 송출 키 holder may end; ending an ended 방송 keeps its {@code ended_at}.
      *
-     * <p>The kick happens after the commit and is best effort: if the media server is unreachable, the 방송 is still
+     * <p>Racing the auto-end, exactly one of them ends the 방송 (and sets {@code ended_at}); only that one kicks.
+     * The kick happens after the commit and is best effort: if the media server is unreachable, the 방송 is still
      * 종료, and the auth callback already refuses any re-publish or new viewer.
      */
-    public EndResult end(long id, String publishKey) {
+    public EndResult end(long id, PublishKey publishKey) {
         EndResult result = transaction.execute(tx -> repository.findById(id)
                 .map(b -> {
-                    if (!PublishKeys.matches(publishKey, b.getPublishKeyHash())) return EndResult.WRONG_KEY;
-                    b.end(now());
-                    return EndResult.ENDED;
+                    if (!publishKey.matches(b.getPublishKeyHash())) return EndResult.WRONG_KEY;
+                    boolean endedNow = repository.endIfLive(id, now(), BroadcastStatus.LIVE, BroadcastStatus.ENDED) == 1;
+                    return endedNow ? EndResult.ENDED : EndResult.ALREADY_ENDED;
                 })
                 .orElse(EndResult.NOT_FOUND));
         if (result == EndResult.ENDED) kickPublisher(id);
@@ -117,15 +112,30 @@ public class BroadcastLifecycle {
      * The auto-end: every 방송 중 방송 whose media last arrived more than 60s before {@code now} (or that started more
      * than 60s ago and never sent any) becomes 종료, with {@code ended_at} = when its media stopped (the last
      * publishing time, or the start time). Their publishers, if any reappeared meanwhile, are cut afterwards.
+     * A 방송 that "방송 종료" ends at the same moment is ended (and kicked) by exactly one of the two.
      *
      * @return the ids of the 방송 it ended
      */
     public List<Long> sweep(Instant now) {
+        return endSilent(now, false);
+    }
+
+    /**
+     * The auto-end while the media server can't be asked who is publishing: silence can't be told from an outage
+     * for a 방송 that has published, so only those that never sent any media (started more than 60s ago) end.
+     *
+     * @return the ids of the 방송 it ended
+     */
+    public List<Long> sweepNeverPublished(Instant now) {
+        return endSilent(now, true);
+    }
+
+    private List<Long> endSilent(Instant now, boolean onlyNeverPublished) {
         Instant cutoff = now.minus(AUTO_END_AFTER);
-        List<Long> ended = transaction.execute(tx -> repository.findLiveSilentSince(BroadcastStatus.LIVE, cutoff)
+        List<Long> ended = transaction.execute(tx -> repository
+                .findLiveSilentSince(BroadcastStatus.LIVE, cutoff, onlyNeverPublished)
                 .stream()
-                .peek(b -> b.end(b.getLastActiveAt()))
-                .map(Broadcast::getId)
+                .filter(id -> repository.endIfSilentSince(id, cutoff, BroadcastStatus.LIVE, BroadcastStatus.ENDED) == 1)
                 .toList());
         ended.forEach(this::kickPublisher);
         return ended;
@@ -143,10 +153,10 @@ public class BroadcastLifecycle {
 
     /** Publishing is allowed only to a 방송 중 방송, and only with its 송출 키. */
     @Transactional(readOnly = true)
-    public boolean authorizePublish(long id, String publishKey) {
+    public boolean authorizePublish(long id, PublishKey publishKey) {
         return repository.findById(id)
                 .filter(Broadcast::isLive)
-                .filter(b -> PublishKeys.matches(publishKey, b.getPublishKeyHash()))
+                .filter(b -> publishKey.matches(b.getPublishKeyHash()))
                 .isPresent();
     }
 

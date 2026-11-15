@@ -1,6 +1,7 @@
 package com.chzzk.vod.domain;
 
 import com.chzzk.common.text.Text;
+import com.chzzk.common.text.Title;
 import com.chzzk.vod.storage.VideoStorage;
 import com.chzzk.vod.storage.VideoStorage.StoredVideo;
 import java.io.BufferedInputStream;
@@ -26,7 +27,6 @@ public class VodService {
 
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
 
-    private static final int TITLE_MAX_CHARS = 100;
     private static final int DESCRIPTION_MAX_CHARS = 2_000;
     private static final int FTYP_SNIFF_BYTES = 8;
 
@@ -40,13 +40,7 @@ public class VodService {
 
     /** @param file the 영상 파일 bytes, or {@code null} when no (or an empty) file was sent */
     public Vod register(String title, String description, InputStream file, VideoFileMetadata metadata) {
-        title = title == null ? "" : Text.trimWhitespace(title);
-        if (title.isEmpty()) {
-            throw new InvalidVodException("title", "제목을 입력해 주세요.");
-        }
-        if (Text.charCount(title) > TITLE_MAX_CHARS) {
-            throw new InvalidVodException("title", "제목은 " + TITLE_MAX_CHARS + "자 이하로 입력해 주세요.");
-        }
+        title = Title.normalize(title, message -> new InvalidVodException("title", message));
         if (description != null && Text.trimWhitespace(description).isEmpty()) {
             description = null; // a blank description is no description
         }

@@ -3,6 +3,7 @@ package com.chzzk.broadcast.web;
 import com.chzzk.broadcast.domain.Broadcast;
 import com.chzzk.broadcast.domain.BroadcastLifecycle;
 import com.chzzk.broadcast.domain.BroadcastStatus;
+import com.chzzk.broadcast.domain.PublishKey;
 import com.chzzk.broadcast.media.MediaPaths;
 import com.chzzk.common.web.PageResponse;
 import com.chzzk.common.web.Paging;
@@ -40,32 +41,21 @@ class BroadcastController {
         Broadcast b = started.broadcast();
         return ResponseEntity.created(URI.create("/api/broadcasts/" + b.getId()))
                 .body(new StartedResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(),
-                        started.publishKey(), mediaUrl(b, "whip")));
+                        started.publishKey().value(), mediaUrl(b, "whip")));
     }
 
     @GetMapping
     PageResponse<BroadcastSummary> list(
-            @RequestParam(required = false) String status,
+            @RequestParam BroadcastStatus status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
         Paging.PageParams params = Paging.of(page, size);
-        return PageResponse.of(broadcasts.list(parseStatus(status), params.page(), params.size())
-                .map(BroadcastSummary::of));
-    }
-
-    private static BroadcastStatus parseStatus(String status) {
-        if (status != null) {
-            for (BroadcastStatus s : BroadcastStatus.values()) {
-                if (s.name().equals(status)) return s;
-            }
-        }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status는 LIVE 또는 ENDED여야 합니다.");
+        return PageResponse.of(broadcasts.list(status, params.page(), params.size()).map(BroadcastSummary::of));
     }
 
     @GetMapping("/{id}")
     BroadcastResponse detail(@PathVariable long id) {
-        Broadcast b = broadcasts.get(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                id + "번 방송을 찾을 수 없습니다."));
+        Broadcast b = broadcasts.get(id).orElseThrow(() -> notFound(id));
         return new BroadcastResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt(),
                 b.isLive() ? mediaUrl(b, "whep") : null);
     }
@@ -74,11 +64,15 @@ class BroadcastController {
     @PostMapping("/{id}/end")
     ResponseEntity<Void> end(@PathVariable long id,
                              @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
-        return switch (broadcasts.end(id, bearerToken(authorization))) {
-            case ENDED -> ResponseEntity.noContent().build();
+        return switch (broadcasts.end(id, PublishKey.presented(bearerToken(authorization)))) {
+            case ENDED, ALREADY_ENDED -> ResponseEntity.noContent().build();
             case WRONG_KEY -> throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "송출 키가 올바르지 않습니다.");
-            case NOT_FOUND -> throw new ResponseStatusException(HttpStatus.NOT_FOUND, id + "번 방송을 찾을 수 없습니다.");
+            case NOT_FOUND -> throw notFound(id);
         };
+    }
+
+    private static ResponseStatusException notFound(long id) {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, id + "번 방송을 찾을 수 없습니다.");
     }
 
     private static String bearerToken(String authorization) {

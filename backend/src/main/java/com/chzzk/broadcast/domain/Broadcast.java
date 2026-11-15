@@ -11,8 +11,8 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * One 방송. Its state changes only through {@link BroadcastLifecycle}, which owns every status transition; this class
- * exposes reads to everyone else.
+ * One 방송. Its state changes only through {@link BroadcastLifecycle}, which makes every status transition with a
+ * conditional update in the database (so concurrent ones can't overwrite each other); this class exposes reads.
  */
 @Entity
 @Table(name = "broadcast")
@@ -29,7 +29,7 @@ public class Broadcast {
     @Column(nullable = false)
     private BroadcastStatus status;
 
-    /** SHA-256 of the 송출 키 (see {@link PublishKeys}); the key itself is never stored. */
+    /** SHA-256 of the 송출 키 (see {@link PublishKey}); the key itself is never stored. */
     @Column(name = "publish_key_hash", nullable = false)
     private String publishKeyHash;
 
@@ -58,21 +58,9 @@ public class Broadcast {
     public Instant getEndedAt() { return endedAt; }
     public Instant getLastPublishingAt() { return lastPublishingAt; }
 
-    /** When media last arrived, or the start time if it never did: what the 60-second auto-end counts from. */
-    Instant getLastActiveAt() {
-        return lastPublishingAt != null ? lastPublishingAt : startedAt;
-    }
-
     public boolean isLive() {
         return status == BroadcastStatus.LIVE;
     }
 
     String getPublishKeyHash() { return publishKeyHash; }
-
-    /** 방송 중 → 종료; there is no way back. Ending an ended 방송 changes nothing. */
-    void end(Instant endedAt) {
-        if (!isLive()) return;
-        this.status = BroadcastStatus.ENDED;
-        this.endedAt = endedAt;
-    }
 }

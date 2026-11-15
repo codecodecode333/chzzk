@@ -1,14 +1,19 @@
 package com.chzzk.broadcast.domain;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
+/**
+ * 방송 rows. The 방송 중 → 종료 transitions are conditional updates ({@code ... and status = LIVE}): the database
+ * re-checks the condition under the row lock, so when "방송 종료" and the auto-end race, exactly one of them changes
+ * the row (and sets {@code ended_at}) and the other sees 0 rows updated.
+ */
 interface BroadcastRepository extends JpaRepository<Broadcast, Long> {
 
     Page<Broadcast> findByStatus(BroadcastStatus status, Pageable pageable);
@@ -17,7 +22,30 @@ interface BroadcastRepository extends JpaRepository<Broadcast, Long> {
     @Query("update Broadcast b set b.lastPublishingAt = :at where b.id in :ids and b.status = :live")
     int recordPublishing(Collection<Long> ids, BroadcastStatus live, Instant at);
 
-    /** 방송 중 방송 whose media last arrived (or, never having published, that started) before {@code cutoff}. */
-    @Query("select b from Broadcast b where b.status = :live and coalesce(b.lastPublishingAt, b.startedAt) < :cutoff")
-    List<Broadcast> findLiveSilentSince(BroadcastStatus live, Instant cutoff);
+    /** 방송 중 → 종료 at {@code at}; 0 when it was not 방송 중 (any more). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Broadcast b set b.status = :ended, b.endedAt = :at where b.id = :id and b.status = :live")
+    int endIfLive(long id, Instant at, BroadcastStatus live, BroadcastStatus ended);
+
+    /**
+     * Ids of 방송 중 방송 whose media last arrived (or, never having published, that started) before {@code cutoff};
+     * with {@code onlyNeverPublished}, just those that never published. In id order, so concurrent sweeps lock rows
+     * in the same order.
+     */
+    @Query("""
+            select b.id from Broadcast b
+            where b.status = :live and coalesce(b.lastPublishingAt, b.startedAt) < :cutoff
+              and (:onlyNeverPublished = false or b.lastPublishingAt is null)
+            order by b.id""")
+    List<Long> findLiveSilentSince(BroadcastStatus live, Instant cutoff, boolean onlyNeverPublished);
+
+    /**
+     * 방송 중 → 종료 with {@code ended_at} = when its media stopped (its last publishing time, or its start time), if
+     * it is still 방송 중 and still silent since before {@code cutoff}; 0 otherwise.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Broadcast b set b.status = :ended, b.endedAt = coalesce(b.lastPublishingAt, b.startedAt)
+            where b.id = :id and b.status = :live and coalesce(b.lastPublishingAt, b.startedAt) < :cutoff""")
+    int endIfSilentSince(long id, Instant cutoff, BroadcastStatus live, BroadcastStatus ended);
 }

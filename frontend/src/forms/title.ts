@@ -1,5 +1,5 @@
 /**
- * The title rule shared by the VOD form and the 송출 screen, mirroring the server's `common.text.Text`
+ * The title rule shared by the VOD form and the 송출 screen, mirroring the server's `common.text.Title`
  * (which stays authoritative): trimmed with JavaScript's `trim()`, then 1–100 characters.
  */
 

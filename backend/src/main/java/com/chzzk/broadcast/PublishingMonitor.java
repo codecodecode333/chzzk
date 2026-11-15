@@ -11,9 +11,10 @@ import org.springframework.stereotype.Component;
 
 /**
  * The publishing monitor: every 10s it asks the media server which 방송 are receiving media, records that, and then
- * lets the lifecycle sweep away the 방송 whose media stopped (the 60-second auto-end). Liveness comes only from this
- * poll of the media server, never from its ready/not-ready hooks, so a missed event or a backend restart can't strand
- * a 방송 as 방송 중. While the media server can't be asked, nothing is ended.
+ * lets the lifecycle sweep away the 방송 whose media stopped (the auto-end after {@link BroadcastLifecycle#AUTO_END_AFTER}).
+ * Liveness comes only from this poll of the media server, never from its ready/not-ready hooks, so a missed event or a
+ * backend restart can't strand a 방송 as 방송 중. While the media server can't be asked, only 방송 that never sent
+ * any media are ended: for the others, silence can't be told from the outage.
  */
 @Component
 class PublishingMonitor {
@@ -35,12 +36,18 @@ class PublishingMonitor {
         try {
             publishing = mediaServer.listPublishingPaths();
         } catch (RuntimeException e) {
-            // Without the media server's answer, silence can't be told from an outage, so nothing is ended this time.
-            log.warn("Could not ask the media server who is publishing; skipping this auto-end sweep", e);
+            log.warn("Could not ask the media server who is publishing; auto-ending only 방송 that never published", e);
+            logEnded(lifecycle.sweepNeverPublished(lifecycle.now()));
             return;
         }
         lifecycle.recordPublishing(publishing);
-        List<Long> ended = lifecycle.sweep(lifecycle.now());
-        if (!ended.isEmpty()) log.info("Auto-ended 방송 {}: no media for over 60 seconds", ended);
+        logEnded(lifecycle.sweep(lifecycle.now()));
+    }
+
+    private static void logEnded(List<Long> ended) {
+        if (!ended.isEmpty()) {
+            log.info("Auto-ended 방송 {}: no media for over {} seconds", ended,
+                    BroadcastLifecycle.AUTO_END_AFTER.toSeconds());
+        }
     }
 }

@@ -30,7 +30,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  */
 // The publishing monitor's schedule is off: tests run its checks by hand, with the clock where they want it.
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "broadcast.publishing-monitor.enabled=false")
+        properties = {"broadcast.publishing-monitor.enabled=false",
+                "broadcast.media-server.auth-secret=" + BroadcastApiTest.AUTH_SECRET})
 @Testcontainers
 @Import(BroadcastTestConfig.class)
 class BroadcastApiTest {
@@ -53,6 +54,12 @@ class BroadcastApiTest {
 
     @Autowired
     PublishingMonitor publishingMonitor;
+
+    /** The shared secret MediaMTX sends on every auth callback (in the query of its {@code authHTTPAddress}). */
+    static final String AUTH_SECRET = "test-auth-secret";
+
+    @Autowired
+    com.chzzk.broadcast.domain.BroadcastLifecycle lifecycle;
 
     static final ParameterizedTypeReference<Map<String, Object>> JSON = new ParameterizedTypeReference<>() {};
 
@@ -102,10 +109,15 @@ class BroadcastApiTest {
 
     /** What MediaMTX sends to the internal auth callback for one WHIP (publish) or WHEP (read) request. */
     HttpStatus mediaServerAsks(String action, String path, String token) {
+        return mediaServerAsks(action, path, token, "?secret=" + AUTH_SECRET);
+    }
+
+    /** As {@link #mediaServerAsks(String, String, String)}, calling the callback with the given query string. */
+    HttpStatus mediaServerAsks(String action, String path, String token, String query) {
         Map<String, Object> request = Map.of("ip", "172.17.0.1", "user", "", "password", "", "token", token,
                 "action", action, "path", path, "protocol", "webrtc", "id", "56b4d011-daa4-4214-b30e-1e9fe721cf63",
                 "query", "", "userAgent", "Mozilla/5.0");
-        ResponseEntity<String> response = http.postForEntity("/internal/mediamtx/auth", request, String.class);
+        ResponseEntity<String> response = http.postForEntity("/internal/mediamtx/auth" + query, request, String.class);
         assertThat(response.getBody()).as("MediaMTX accepts only an empty or JSON body").isNull();
         return HttpStatus.valueOf(response.getStatusCode().value());
     }
@@ -204,6 +216,21 @@ class BroadcastApiTest {
 
         end(id, (String) started.get("publishKey"));
         assertThat(mediaServerAsks("read", "broadcasts/" + id, "")).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void mediaServerCallbackWithoutTheSharedSecretIsRefused() {
+        long id = startedId("비밀 없는 콜백");
+        String key = publishKeys.get(id);
+        String path = "broadcasts/" + id;
+
+        for (String query : List.of("", "?secret=", "?secret=wrong", "?secret=" + AUTH_SECRET + "x",
+                "?other=" + AUTH_SECRET)) {
+            assertThat(mediaServerAsks("read", path, "", query)).as(query).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(mediaServerAsks("publish", path, key, query)).as(query).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+        assertThat(mediaServerAsks("read", path, "")).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(mediaServerAsks("publish", path, key)).isEqualTo(HttpStatus.NO_CONTENT);
     }
 
     @Test
@@ -410,6 +437,7 @@ class BroadcastApiTest {
         clock.set(start);
         long id = startedId("미디어 서버 점검 중");
         mediaServer.startPublishing(id);
+        monitorChecksAt(start.plusSeconds(10));
         mediaServer.becomeUnreachable();
         try {
             monitorChecksAt(start.plusSeconds(300));
@@ -418,5 +446,94 @@ class BroadcastApiTest {
         }
 
         assertThat(detail(id).getBody()).containsEntry("status", "LIVE");
+    }
+
+    @Test
+    void aBroadcastThatNeverPublishedStillEndsWhileTheMediaServerCannotBeAsked() {
+        Instant start = Instant.parse("2026-11-15T19:00:00Z");
+        clock.set(start);
+        long silent = startedId("시작만 하고 점검 중");
+        long publishing = startedId("송출하다 점검 중");
+        mediaServer.startPublishing(publishing);
+        monitorChecksAt(start.plusSeconds(10));
+        mediaServer.becomeUnreachable();
+        try {
+            monitorChecksAt(start.plusSeconds(60));
+            assertThat(detail(silent).getBody()).as("only 60s").containsEntry("status", "LIVE");
+            monitorChecksAt(start.plusSeconds(300));
+        } finally {
+            mediaServer.reset();
+        }
+
+        assertThat(detail(silent).getBody())
+                .containsEntry("status", "ENDED")
+                .containsEntry("endedAt", "2026-11-15T19:00:00Z");
+        assertThat(detail(publishing).getBody()).as("silence can't be told from an outage")
+                .containsEntry("status", "LIVE");
+    }
+
+    @Test
+    void theAutoEndWorksFromTheDatabaseAloneAfterARestart() {
+        Instant start = Instant.parse("2026-11-15T20:00:00Z");
+        clock.set(start);
+        long id = startedId("재시작 전에 송출한 방송");
+        mediaServer.startPublishing(id);
+        monitorChecksAt(start.plusSeconds(10));
+
+        // A restarted backend: a new publishing monitor over a media server that has never seen this 방송.
+        FakeMediaServerGateway restartedMediaServer = new FakeMediaServerGateway();
+        PublishingMonitor restartedMonitor = new PublishingMonitor(restartedMediaServer, lifecycle);
+        clock.set(start.plusSeconds(70));
+        restartedMonitor.check();
+        assertThat(detail(id).getBody()).as("exactly 60s since its last media").containsEntry("status", "LIVE");
+        clock.set(start.plusSeconds(80));
+        restartedMonitor.check();
+
+        assertThat(detail(id).getBody())
+                .containsEntry("status", "ENDED")
+                .containsEntry("endedAt", "2026-11-15T20:00:10Z");
+    }
+
+    @Test
+    void endingAndTheAutoEndRacingEndEachBroadcastExactlyOnce() throws Exception {
+        Instant start = Instant.parse("2026-11-15T21:00:00Z");
+        clock.set(start);
+        List<Long> ids = new java.util.ArrayList<>();
+        for (int i = 0; i < 40; i++) ids.add(startedId("경쟁 " + i));
+        mediaServer.reset();
+        clock.set(start.plusSeconds(61)); // every one is due for the auto-end, and the 송출자 ends it now
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(9);
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        try {
+            List<java.util.concurrent.Future<?>> work = new java.util.ArrayList<>();
+            for (long id : ids) {
+                work.add(pool.submit(() -> {
+                    go.await();
+                    return end(id, publishKeys.get(id)).getStatusCode();
+                }));
+            }
+            for (int i = 0; i < 4; i++) {
+                work.add(pool.submit(() -> {
+                    go.await();
+                    publishingMonitor.check();
+                    return null;
+                }));
+            }
+            go.countDown();
+            for (java.util.concurrent.Future<?> f : work) f.get(60, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        for (long id : ids) {
+            assertThat(mediaServer.kicked()).as("kicks of %d", id).containsOnlyOnce(id);
+            Object endedAt = detail(id).getBody().get("endedAt");
+            assertThat(endedAt).as("ended_at of %d is the auto-end's or the 송출자's, whole", id)
+                    .isIn("2026-11-15T21:00:00Z", "2026-11-15T21:01:01Z");
+            Number count = jdbc.queryForObject("select count(*) from broadcast where id = ? and status = 'ENDED'",
+                    Number.class, id);
+            assertThat(count.intValue()).isEqualTo(1);
+        }
     }
 }
