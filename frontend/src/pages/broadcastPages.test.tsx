@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router'
@@ -239,6 +239,162 @@ describe('송출 screen', () => {
   })
 })
 
+describe('송출 screen when publishing fails or drops', () => {
+  /** "방송 시작" answers with a new id (7, 8, ...) and key `key-{id}` each time; ended ids are recorded. */
+  function serveStartsAndEnds() {
+    let nextId = 7
+    const ends: string[] = []
+    let starts = 0
+    server.use(
+      http.post('/api/broadcasts', () => {
+        starts++
+        const id = nextId++
+        return HttpResponse.json(
+          {
+            id,
+            title: '저녁 산책',
+            status: 'LIVE',
+            startedAt: new Date().toISOString(),
+            publishKey: `key-${id}`,
+            whipUrl: `/live/broadcasts/${id}/whip`,
+          },
+          { status: 201 },
+        )
+      }),
+      http.post('/api/broadcasts/:id/end', ({ params, request }) => {
+        ends.push(`${String(params.id)} ${request.headers.get('Authorization')}`)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    return { ends, starts: () => starts }
+  }
+
+  function serveDetail(status: 'LIVE' | 'ENDED') {
+    let requests = 0
+    server.use(
+      http.get('/api/broadcasts/7', () => {
+        requests++
+        return HttpResponse.json({
+          id: 7,
+          title: '저녁 산책',
+          status,
+          startedAt: '2026-11-15T10:00:00Z',
+          endedAt: status === 'ENDED' ? '2026-11-15T10:05:00Z' : null,
+          whepUrl: status === 'LIVE' ? '/live/broadcasts/7/whep' : null,
+        })
+      }),
+    )
+    return () => requests
+  }
+
+  async function startBroadcastOnScreen(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByTestId('camera-preview')
+    await user.type(screen.getByLabelText('제목'), '저녁 산책')
+    await user.click(screen.getByRole('button', { name: '방송 시작' }))
+  }
+
+  it('ends the just-started 방송 when publishing fails, so a retry leaves no ghost 방송 중', async () => {
+    const user = userEvent.setup()
+    mocked.openCamera.mockResolvedValue(fakeStream)
+    mocked.publish
+      .mockRejectedValueOnce(new media.MediaError('signaling-failed', '미디어 서버에 연결하지 못했습니다.'))
+      .mockResolvedValueOnce({ stop: vi.fn() })
+    const { ends } = serveStartsAndEnds()
+
+    renderAt('/broadcasts/new')
+    await startBroadcastOnScreen(user)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('미디어 서버에 연결하지 못했습니다.')
+    await waitFor(() => expect(ends).toEqual(['7 Bearer key-7']))
+
+    await user.click(screen.getByRole('button', { name: '방송 시작' }))
+    expect(await screen.findByText('방송 중')).toBeInTheDocument()
+    expect(mocked.publish).toHaveBeenLastCalledWith(fakeStream, '/live/broadcasts/8/whip', 'key-8', expect.anything())
+    expect(ends).toEqual(['7 Bearer key-7'])
+  })
+
+  it('forgets the failed 방송, so a reload offers no 이어서 송출 for it', async () => {
+    const user = userEvent.setup()
+    mocked.openCamera.mockResolvedValue(fakeStream)
+    mocked.publish.mockRejectedValue(new media.MediaError('signaling-failed', '미디어 서버에 연결하지 못했습니다.'))
+    serveStartsAndEnds()
+    const detailRequests = serveDetail('LIVE')
+
+    const first = renderAt('/broadcasts/new')
+    await startBroadcastOnScreen(user)
+    await screen.findByRole('alert')
+    first.unmount()
+
+    renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+    expect(screen.getByRole('button', { name: '방송 시작' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '이어서 송출' })).not.toBeInTheDocument()
+    expect(detailRequests()).toBe(0)
+  })
+
+  it('shows 종료됨 and releases the camera when the publication drops because the 방송 ended', async () => {
+    const user = userEvent.setup()
+    const stopPublishing = vi.fn()
+    mocked.openCamera.mockResolvedValue(fakeStream)
+    mocked.publish.mockResolvedValue({ stop: stopPublishing })
+    serveStartsAndEnds()
+    serveDetail('ENDED')
+
+    renderAt('/broadcasts/new')
+    await startBroadcastOnScreen(user)
+    await screen.findByText('방송 중')
+    const { onDisconnect } = mocked.publish.mock.calls[0][3]!
+    act(() => onDisconnect!())
+
+    expect(await screen.findByText('종료됨')).toBeInTheDocument()
+    expect(stopPublishing).toHaveBeenCalled()
+    expect(mocked.closeStream).toHaveBeenCalledWith(fakeStream)
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument()
+  })
+
+  it('says 송출이 끊겼습니다 when the publication drops while still 방송 중, and reconnects to the same 방송', async () => {
+    const user = userEvent.setup()
+    const dropped = { stop: vi.fn() }
+    mocked.openCamera.mockResolvedValue(fakeStream)
+    mocked.publish.mockResolvedValueOnce(dropped).mockResolvedValueOnce({ stop: vi.fn() })
+    const { starts } = serveStartsAndEnds()
+    serveDetail('LIVE')
+
+    renderAt('/broadcasts/new')
+    await startBroadcastOnScreen(user)
+    await screen.findByText('방송 중')
+    const { onDisconnect } = mocked.publish.mock.calls[0][3]!
+    act(() => onDisconnect!())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('송출이 끊겼습니다')
+    expect(dropped.stop).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '다시 연결' }))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(mocked.publish).toHaveBeenCalledTimes(2)
+    expect(mocked.publish).toHaveBeenLastCalledWith(fakeStream, '/live/broadcasts/7/whip', 'key-7', expect.anything())
+    expect(screen.getByText('방송 중')).toBeInTheDocument()
+    expect(starts()).toBe(1)
+  })
+
+  it('closes a publication that connects after the 송출 screen was left', async () => {
+    const user = userEvent.setup()
+    const late = { stop: vi.fn() }
+    let connect: (session: media.Session) => void = () => {}
+    mocked.openCamera.mockResolvedValue(fakeStream)
+    mocked.publish.mockReturnValue(new Promise((resolve) => (connect = resolve)))
+    serveStartsAndEnds()
+
+    const page = renderAt('/broadcasts/new')
+    await startBroadcastOnScreen(user)
+    await waitFor(() => expect(mocked.publish).toHaveBeenCalled())
+    page.unmount()
+    await act(async () => connect(late))
+
+    expect(late.stop).toHaveBeenCalled()
+  })
+})
+
 describe('송출 screen after a reload', () => {
   const started = {
     id: 7,
@@ -327,6 +483,42 @@ describe('송출 screen after a reload', () => {
     expect(screen.getByRole('button', { name: '방송 시작' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '이어서 송출' })).not.toBeInTheDocument()
     expect(detailRequests).toBe(0)
+  })
+
+  it('새 방송으로 시작 ends the stored 방송 with its 송출 키 before forgetting it', async () => {
+    let ended: string | null = null
+    const user = await startThenReload()
+    server.use(
+      http.get('/api/broadcasts/7', () => HttpResponse.json(detail)),
+      http.post('/api/broadcasts/7/end', ({ request }) => {
+        ended = request.headers.get('Authorization')
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+    await user.click(await screen.findByRole('button', { name: '새 방송으로 시작' }))
+
+    expect(await screen.findByRole('button', { name: '방송 시작' })).toBeInTheDocument()
+    expect(ended).toBe('Bearer the-publish-key')
+    expect(screen.queryByRole('button', { name: '이어서 송출' })).not.toBeInTheDocument()
+  })
+
+  it('closes a resumed publication that connects after the 송출 screen was left', async () => {
+    const late = { stop: vi.fn() }
+    let connect: (session: media.Session) => void = () => {}
+    const user = await startThenReload()
+    server.use(http.get('/api/broadcasts/7', () => HttpResponse.json(detail)))
+    mocked.publish.mockReturnValue(new Promise((resolve) => (connect = resolve)))
+
+    const page = renderAt('/broadcasts/new')
+    await screen.findByTestId('camera-preview')
+    await user.click(await screen.findByRole('button', { name: '이어서 송출' }))
+    page.unmount()
+    await act(async () => connect(late))
+
+    expect(late.stop).toHaveBeenCalled()
   })
 
   it('warns before leaving the page while 방송 중, and not before', async () => {

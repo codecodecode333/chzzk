@@ -96,14 +96,23 @@ export function BroadcastWatchPage() {
 const RETRY_MS = 3000
 
 /**
+ * The player's connection to the media server. This is not a 방송 상태 (the 방송 is 방송 중 throughout): it only says
+ * whether media reaches this player yet. `awaiting-media` is shown as "송출 준비 중…".
+ */
+type PlayerConnection =
+  | { state: 'connecting' }
+  | { state: 'playing'; stream: MediaStream }
+  | { state: 'awaiting-media' }
+
+/**
  * Plays a 방송 over WHEP: autoplays muted (browsers block unmuted autoplay) with a 소리 켜기 overlay.
  * While the connection fails or drops (media not flowing yet, or the 송출자 reconnecting) it shows "송출 준비 중…"
  * and tries again every 3s; the page unmounts it once the 방송 is 종료, which stops the retries and the playback.
  * `onDisconnect` fires on every failure or drop, so the page can re-check the status right away.
  */
 function LivePlayer({ whepUrl, onDisconnect }: { whepUrl: string; onDisconnect: () => void }) {
-  const [stream, setStream] = useState<MediaStream | null>(null)
-  const [waiting, setWaiting] = useState(false)
+  const [connection, setConnection] = useState<PlayerConnection>({ state: 'connecting' })
+  const stream = connection.state === 'playing' ? connection.stream : null
   /** Bumped to make another connection attempt. */
   const [attempt, setAttempt] = useState(0)
   const [muted, setMuted] = useState(true)
@@ -123,16 +132,14 @@ function LivePlayer({ whepUrl, onDisconnect }: { whepUrl: string; onDisconnect: 
       failed = true
       stop?.()
       stop = undefined
-      setStream(null)
-      setWaiting(true)
+      setConnection({ state: 'awaiting-media' })
       onDisconnectRef.current()
       retry = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS)
     }
     watch(whepUrl, { onDisconnect: fail }).then((playback) => {
       if (!active || failed) return playback.stop()
       stop = () => playback.stop()
-      setWaiting(false)
-      setStream(playback.stream)
+      setConnection({ state: 'playing', stream: playback.stream })
     }, fail)
     return () => {
       active = false
@@ -158,7 +165,7 @@ function LivePlayer({ whepUrl, onDisconnect }: { whepUrl: string; onDisconnect: 
         playsInline
         className="aspect-video w-full rounded-lg bg-black"
       />
-      {waiting && (
+      {connection.state === 'awaiting-media' && (
         <p role="status" className="absolute inset-0 flex items-center justify-center text-zinc-300">
           송출 준비 중…
         </p>

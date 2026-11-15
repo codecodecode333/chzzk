@@ -74,7 +74,8 @@ describe('방송 목록 home', () => {
     expect(endedCard).toHaveAttribute('href', '/broadcasts/1')
     expect(endedCard).toHaveTextContent('종료')
     expect(endedCard).not.toHaveTextContent('방송 중')
-    expect(endedCard).toHaveTextContent('18:30') // ended 09:30Z = 18:30 KST
+    expect(endedCard).toHaveTextContent(/18:00.*시작/) // started 09:00Z = 18:00 KST
+    expect(endedCard).toHaveTextContent(/18:30.*종료/) // ended 09:30Z = 18:30 KST
   })
 
   it('shows a friendly empty state with a way to start a 방송 when there are no 방송 at all', async () => {

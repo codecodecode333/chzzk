@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-/** Time on air since `since` (ISO), as `mm:ss` or `h:mm:ss`, ticking every second. */
+/** 방송 경과 시간: how long the 방송 has been 방송 중 since `since` (ISO), as `mm:ss` or `h:mm:ss`, ticking every second. */
 export function ElapsedTimer({ since }: { since: string }) {
   const [now, setNow] = useState(() => Date.now())
 

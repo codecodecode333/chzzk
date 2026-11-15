@@ -131,15 +131,14 @@ function BroadcastCard({ broadcast: b }: { broadcast: BroadcastSummary }) {
             {isLive ? <LiveBadge /> : <EndedBadge />}
             <h3 className="truncate font-semibold">{b.title}</h3>
           </div>
-          <p className="text-sm text-zinc-400">
-            {isLive || !b.endedAt ? (
-              <>
-                <time dateTime={b.startedAt}>{formatDateTime(b.startedAt)}</time> 시작
-              </>
-            ) : (
-              <>
+          <p className="flex flex-wrap gap-x-3 text-sm text-zinc-400">
+            <span>
+              <time dateTime={b.startedAt}>{formatDateTime(b.startedAt)}</time> 시작
+            </span>
+            {!isLive && b.endedAt && (
+              <span>
                 <time dateTime={b.endedAt}>{formatDateTime(b.endedAt)}</time> 종료
-              </>
+              </span>
             )}
           </p>
         </div>
