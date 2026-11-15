@@ -5,6 +5,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
  * The broadcast lifecycle: the single owner of 방송 status rules, the 송출 키 and who may publish or read.
  *
  * <p>State lives only in the database, so it survives restarts. Time comes from the injected {@link Clock}.
- * Later additions belong here too: {@code list(status, page)}, {@code end(id, publishKey)} (then kick the publisher via
+ * Later additions belong here too: {@code end(id, publishKey)} (then kick the publisher via
  * the media server gateway), and {@code sweep(now)} for the 60-second auto-end.
  */
 @Service
@@ -49,6 +52,16 @@ public class BroadcastLifecycle {
     @Transactional(readOnly = true)
     public Optional<Broadcast> get(long id) {
         return repository.findById(id);
+    }
+
+    /** 방송 중 newest started first; 종료 most recently ended first. */
+    @Transactional(readOnly = true)
+    public Page<Broadcast> list(BroadcastStatus status, int page, int size) {
+        Sort order = switch (status) {
+            case LIVE -> Sort.by(Sort.Order.desc("startedAt"), Sort.Order.desc("id"));
+            case ENDED -> Sort.by(Sort.Order.desc("endedAt"), Sort.Order.desc("id"));
+        };
+        return repository.findByStatus(status, PageRequest.of(page, size, order));
     }
 
     /** Publishing is allowed only to a 방송 중 방송, and only with its 송출 키. */

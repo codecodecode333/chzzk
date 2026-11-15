@@ -4,6 +4,8 @@ import com.chzzk.broadcast.domain.Broadcast;
 import com.chzzk.broadcast.domain.BroadcastLifecycle;
 import com.chzzk.broadcast.domain.BroadcastStatus;
 import com.chzzk.broadcast.media.MediaPaths;
+import com.chzzk.common.web.PageResponse;
+import com.chzzk.common.web.Paging;
 import java.net.URI;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -38,6 +41,25 @@ class BroadcastController {
                         started.publishKey(), mediaUrl(b, "whip")));
     }
 
+    @GetMapping
+    PageResponse<BroadcastSummary> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
+        Paging.PageParams params = Paging.of(page, size);
+        return PageResponse.of(broadcasts.list(parseStatus(status), params.page(), params.size())
+                .map(BroadcastSummary::of));
+    }
+
+    private static BroadcastStatus parseStatus(String status) {
+        if (status != null) {
+            for (BroadcastStatus s : BroadcastStatus.values()) {
+                if (s.name().equals(status)) return s;
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status는 LIVE 또는 ENDED여야 합니다.");
+    }
+
     @GetMapping("/{id}")
     BroadcastResponse detail(@PathVariable long id) {
         Broadcast b = broadcasts.get(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -57,6 +79,13 @@ class BroadcastController {
     /** The only response that carries the 송출 키. */
     record StartedResponse(Long id, String title, BroadcastStatus status, Instant startedAt, String publishKey,
                            String whipUrl) {}
+
+    /** A 방송 card in the 방송 목록; the player URL comes from the detail. */
+    record BroadcastSummary(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt) {
+        static BroadcastSummary of(Broadcast b) {
+            return new BroadcastSummary(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt());
+        }
+    }
 
     /** {@code whepUrl} is {@code null} unless the 방송 is 방송 중. */
     record BroadcastResponse(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt,

@@ -184,4 +184,89 @@ class BroadcastApiTest {
         endInDatabase(id, clock.instant());
         assertThat(mediaServerAsks("read", "broadcasts/" + id, "")).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
+
+    /** Test setup only: start from an empty broadcast table so list contents and totals are predictable. */
+    void emptyBroadcastTable() {
+        jdbc.update("DELETE FROM broadcast");
+    }
+
+    ResponseEntity<Map<String, Object>> list(String query) {
+        return http.exchange("/api/broadcasts" + query, HttpMethod.GET, null, JSON);
+    }
+
+    @SuppressWarnings("unchecked")
+    static List<String> titles(ResponseEntity<Map<String, Object>> page) {
+        assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return ((List<Map<String, Object>>) page.getBody().get("content")).stream()
+                .map(b -> (String) b.get("title"))
+                .toList();
+    }
+
+    @Test
+    void listsLiveBroadcastsNewestStartedFirstAndEndedOnesMostRecentlyEndedFirst() {
+        emptyBroadcastTable();
+        clock.set(Instant.parse("2026-11-15T09:00:00Z"));
+        long endedEarly = startedId("일찍 끝난 방송");
+        clock.set(Instant.parse("2026-11-15T09:10:00Z"));
+        long endedLate = startedId("늦게 끝난 방송");
+        clock.set(Instant.parse("2026-11-15T09:20:00Z"));
+        startedId("먼저 시작한 방송");
+        clock.set(Instant.parse("2026-11-15T09:30:00Z"));
+        startedId("나중에 시작한 방송");
+        // started first but ended last: ENDED ordering follows endedAt, not startedAt
+        endInDatabase(endedEarly, Instant.parse("2026-11-15T09:40:00Z"));
+        endInDatabase(endedLate, Instant.parse("2026-11-15T09:35:00Z"));
+
+        ResponseEntity<Map<String, Object>> live = list("?status=LIVE");
+        ResponseEntity<Map<String, Object>> ended = list("?status=ENDED");
+
+        assertThat(titles(live)).containsExactly("나중에 시작한 방송", "먼저 시작한 방송");
+        assertThat(titles(ended)).containsExactly("일찍 끝난 방송", "늦게 끝난 방송");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> card = ((List<Map<String, Object>>) ended.getBody().get("content")).get(0);
+        assertThat(card)
+                .containsEntry("id", (int) endedEarly)
+                .containsEntry("status", "ENDED")
+                .containsEntry("startedAt", "2026-11-15T09:00:00Z")
+                .containsEntry("endedAt", "2026-11-15T09:40:00Z")
+                .doesNotContainKey("publishKey")
+                .doesNotContainKey("whepUrl");
+        assertThat(ended.getBody()).containsEntry("page", 0).containsEntry("size", 20)
+                .containsEntry("totalElements", 2).containsEntry("totalPages", 1);
+    }
+
+    @Test
+    void endedBroadcastsArePagedAcrossThePageBoundaryAndOversizedPagesAreCapped() {
+        emptyBroadcastTable();
+        clock.set(Instant.parse("2026-11-15T08:00:00Z"));
+        for (int i = 1; i <= 21; i++) {
+            long id = startedId("종료 " + i);
+            endInDatabase(id, Instant.parse("2026-11-15T08:00:00Z").plusSeconds(60L * i));
+        }
+        startedId("방송 중"); // never appears in the ENDED pages
+
+        ResponseEntity<Map<String, Object>> first = list("?status=ENDED&page=0");
+        ResponseEntity<Map<String, Object>> second = list("?status=ENDED&page=1");
+        ResponseEntity<Map<String, Object>> sized = list("?status=ENDED&page=2&size=10");
+        ResponseEntity<Map<String, Object>> huge = list("?status=ENDED&size=100000");
+
+        assertThat(titles(first)).hasSize(20).startsWith("종료 21").endsWith("종료 2");
+        assertThat(first.getBody()).containsEntry("totalElements", 21).containsEntry("totalPages", 2);
+        assertThat(titles(second)).containsExactly("종료 1");
+        assertThat(second.getBody()).containsEntry("page", 1);
+        assertThat(titles(sized)).containsExactly("종료 1");
+        assertThat(huge.getBody()).containsEntry("size", 100);
+        assertThat(titles(list("?status=LIVE"))).containsExactly("방송 중");
+    }
+
+    @Test
+    void listWithMissingOrInvalidStatusOrBadPagingIsProblemDetails400() {
+        for (String query : List.of("", "?status=", "?status=live", "?status=PAUSED", "?status=LIVE&page=-1",
+                "?status=LIVE&size=0", "?status=ENDED&size=-5", "?status=LIVE&page=abc", "?status=ENDED&size=xyz")) {
+            ResponseEntity<Map<String, Object>> response = list(query);
+
+            assertThat(response.getStatusCode()).as(query).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertProblem(response, HttpStatus.BAD_REQUEST);
+        }
+    }
 }
