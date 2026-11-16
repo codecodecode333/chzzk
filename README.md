@@ -124,7 +124,7 @@ client sends it by itself.
 | 로그아웃 (`POST /api/auth/logout`) | 누구나 (ends the session if there is one) | — |
 | 내 정보 (`GET /api/me`) | 로그인 회원 | `401` |
 | VOD 목록·상세 (`GET /api/vods`, `/api/vods/{id}`), 재생 (`GET /api/vods/{id}/stream`) | 누구나 | — |
-| 방송 목록·상세 (`GET /api/broadcasts`, `/api/broadcasts/{id}`) | 누구나 | — |
+| 방송 목록·상세 (`GET /api/broadcasts`, `/api/broadcasts/{id}`; `?ownerId=` narrows the 목록 to one 회원's 방송, still public data) | 누구나 | — |
 | 방송 시청 (WHEP through MediaMTX) | 누구나, while 방송 중 | refused by the auth callback once 종료 |
 | VOD 등록 (`POST /api/vods`) | 로그인 회원 (becomes its 소유자) | `401` |
 | VOD 수정·삭제 (`PATCH`, `DELETE /api/vods/{id}`; 삭제 takes its 영상 파일 and 댓글) | 소유자 | `401` / `403` |
@@ -134,7 +134,7 @@ client sends it by itself.
 | 송출 (WHIP through MediaMTX) | whoever holds the 방송's current 송출 키, while 방송 중 | refused by the auth callback |
 | 방송 제목 수정 (`PATCH /api/broadcasts/{id}`) | 소유자, 방송 중 or 종료 | `401` / `403` |
 | 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글) | 소유자, once 종료 | `401` / `403`; `409` while 방송 중 |
-| 댓글 목록 (`GET /api/vods/{id}/comments`, `/api/broadcasts/{id}/comments`) | 누구나 | `404` for an unknown VOD or 방송 |
+| 댓글 목록 (`GET /api/vods/{id}/comments`, `/api/broadcasts/{id}/comments`; `?before=` for older, `?after=` for newer) | 누구나 | `404` for an unknown VOD or 방송 |
 | 댓글 쓰기 (`POST` to the same paths; on a 방송 중 or 종료 방송) | 로그인 회원 | `401`; `404` for an unknown VOD or 방송 |
 | 댓글 수정·삭제 (`PATCH`, `DELETE /api/comments/{id}`) | 작성자 | `401` / `403` |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
@@ -142,6 +142,12 @@ client sends it by itself.
 시청, 목록 and 댓글 목록 need no login: a VOD or 방송 link shared with someone should just play, and reading the 댓글
 next to it reveals nothing that isn't already public (only the 작성자's 닉네임, never an email). Login is asked only
 where a write has to be tied to a 회원: who owns a VOD or 방송, who wrote a 댓글.
+
+Login and 회원가입 also issue a fresh CSRF token (a new `XSRF-TOKEN` cookie), so a token known before login stops
+working; the frontend client reads the cookie on every write, so it picks the new one up by itself.
+
+While a 방송 is 방송 중, its 시청 page polls for new 댓글 every 5s (with `?after=`, page by page, so none is skipped).
+Polling brings new 댓글 only: other people's edits and deletions show after a reload.
 
 ### Running with login
 
@@ -194,15 +200,18 @@ Conventions:
   `withNext('/login', path)` and only follow `next` through `safeNext` (`src/members/next.ts`, in-app paths only). The
   shared `client.ts` adds the CSRF header to every write by itself; show per-field server errors with
   `apiFieldErrors(error)` and form fields with `forms/Field.tsx`.
-- Backend packages: `com.chzzk` is the feature-neutral application root (`BackendApplication`). Each feature is a module beneath it (`com.chzzk.vod` with `domain/`, `storage/`, `web/`; `com.chzzk.broadcast` with `domain/`, `media/`, `web/`). Code shared by features lives in `com.chzzk.common` (e.g. `common.web`, `common.text.Title` for the shared title rule); features don't depend on each other.
+- Backend packages: `com.chzzk` is the feature-neutral application root (`BackendApplication`). Each feature is a module beneath it (`com.chzzk.vod` with `domain/`, `storage/`, `web/`; `com.chzzk.broadcast` with `domain/`, `media/`, `web/`). Code shared by features lives in `com.chzzk.common` (e.g. `common.web`, `common.text.Title` for the shared title rule); features don't depend on each other. A feature that needs a 회원 (a VOD's or 방송's 소유자) maps its own read-only view of the `member` table (`vod.domain.VodOwner`, `broadcast.domain.BroadcastOwner`) instead of importing the member module; the API shape of any 회원 is `common.auth.MemberRef` (`{id, nickname}`).
 - 방송 status rules, the 송출 키 (`PublishKey`), publish/read authorization and the 60s auto-end (`sweep`) live only in `broadcast.domain.BroadcastLifecycle`; every 방송 중 → 종료 is a conditional update, so 방송 종료 and the auto-end can't both win; `broadcast.PublishingMonitor` feeds it from the media server every 10s (API tests switch its schedule off with `broadcast.publishing-monitor.enabled=false` and call `check()` themselves). MediaMTX is reached only through `broadcast.media.MediaServerGateway` (`MediaMtxGateway`); `MediaPaths` is the one `broadcasts/{id}` mapping.
 - Every API error is RFC 7807 Problem Details (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation, built with `common.web.Problems.fieldError`). `common.web.ApiProblemHandler` covers Spring's own exceptions and the 500 catch-all; each feature maps its domain exceptions in its own `@RestControllerAdvice` ordered `ApiProblemHandler.FEATURE_ORDER` (e.g. `vod.web.VodProblemHandler`). Throw `ResponseStatusException` or a mapped domain exception; don't hand-roll error bodies.
   The one exception is MediaMTX's auth callback (`broadcast.web.MediaServerAuthController`): MediaMTX's contract wants
   an empty 2xx to allow and any other status to deny, so it answers a bare `204`/`401` with no body.
 - 댓글 (`com.chzzk.comment`) attach to a `CommentTarget` (`vod(id)` or `broadcast(id)`): `CommentService.list/write/edit/delete`
   checks login and authorship itself; the `comment` table has `vod_id`/`broadcast_id` (exactly one set, both
-  `ON DELETE CASCADE`). It reads target existence and the 작성자's 닉네임 straight from the shared tables, so it
-  depends on no other feature module. Paging is a cursor: `?before=<nextBefore>&size=` (newest first, by id). On the
+  `ON DELETE CASCADE`). It reads target existence and the 작성자's 닉네임 straight from the shared tables (native
+  exists queries on the `vod` and `broadcast` tables, a read-only view of `member`), so it depends on no other feature
+  module; by design that couples it to those table names instead, so renaming them means updating
+  `comment.domain.CommentRepository`. Paging is a cursor, newest first by id: `?before=<nextBefore>&size=` for older
+  댓글, `?after=<newest id read>&size=` (follow `nextAfter` until `null`) for newer ones when polling. On the
   frontend, `<CommentSection target={{ kind: 'vod' | 'broadcast', id }} />` (`src/comments/`) is the one 댓글 UI, over
   `src/api/comments.ts`.
 - Registration form rules live in `frontend/src/vods/validateVodForm.ts` (pure, mirrors the server), separate from how the form submits.
