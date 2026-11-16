@@ -5,18 +5,17 @@ import com.chzzk.broadcast.domain.BroadcastLifecycle;
 import com.chzzk.broadcast.domain.BroadcastStatus;
 import com.chzzk.broadcast.domain.PublishKey;
 import com.chzzk.broadcast.media.MediaPaths;
+import com.chzzk.common.auth.MemberRef;
 import com.chzzk.common.web.PageResponse;
 import com.chzzk.common.web.Paging;
 import java.net.URI;
 import java.time.Instant;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -41,44 +40,44 @@ class BroadcastController {
         Broadcast b = started.broadcast();
         return ResponseEntity.created(URI.create("/api/broadcasts/" + b.getId()))
                 .body(new StartedResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(),
-                        started.publishKey().value(), mediaUrl(b, "whip")));
+                        Owner.of(b), started.publishKey().value(), mediaUrl(b, "whip")));
     }
 
     @GetMapping
     PageResponse<BroadcastSummary> list(
             @RequestParam BroadcastStatus status,
+            @RequestParam(required = false) Long ownerId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
         Paging.PageParams params = Paging.of(page, size);
-        return PageResponse.of(broadcasts.list(status, params.page(), params.size()).map(BroadcastSummary::of));
+        return PageResponse.of(broadcasts.list(status, ownerId, params.page(), params.size()).map(BroadcastSummary::of));
     }
 
     @GetMapping("/{id}")
     BroadcastResponse detail(@PathVariable long id) {
         Broadcast b = broadcasts.get(id).orElseThrow(() -> notFound(id));
         return new BroadcastResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt(),
-                b.isLive() ? mediaUrl(b, "whep") : null);
+                Owner.of(b), b.isLive() ? mediaUrl(b, "whep") : null);
     }
 
-    /** "방송 종료": the 송출 키 comes as {@code Authorization: Bearer}; ending twice is a successful no-op. */
+    /** "방송 종료" by the 소유자's login session; ending twice is a successful no-op. */
     @PostMapping("/{id}/end")
-    ResponseEntity<Void> end(@PathVariable long id,
-                             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
-        return switch (broadcasts.end(id, PublishKey.presented(bearerToken(authorization)))) {
+    ResponseEntity<Void> end(@PathVariable long id) {
+        return switch (broadcasts.end(id)) {
             case ENDED, ALREADY_ENDED -> ResponseEntity.noContent().build();
-            case WRONG_KEY -> throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "송출 키가 올바르지 않습니다.");
             case NOT_FOUND -> throw notFound(id);
         };
     }
 
-    private static ResponseStatusException notFound(long id) {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, id + "번 방송을 찾을 수 없습니다.");
+    /** "이어서 송출": a fresh 송출 키 for the 소유자's 방송 중 방송; the previous key stops working. */
+    @PostMapping("/{id}/publish-key")
+    PublishKeyResponse issuePublishKey(@PathVariable long id) {
+        PublishKey publishKey = broadcasts.issuePublishKey(id).orElseThrow(() -> notFound(id));
+        return new PublishKeyResponse(publishKey.value(), "/live/" + MediaPaths.of(id) + "/whip");
     }
 
-    private static String bearerToken(String authorization) {
-        String prefix = "Bearer ";
-        if (authorization == null || !authorization.regionMatches(true, 0, prefix, 0, prefix.length())) return null;
-        return authorization.substring(prefix.length()).trim();
+    private static ResponseStatusException notFound(long id) {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, id + "번 방송을 찾을 수 없습니다.");
     }
 
     /**
@@ -89,18 +88,30 @@ class BroadcastController {
         return "/live/" + MediaPaths.of(b.getId()) + "/" + protocol;
     }
 
-    /** The only response that carries the 송출 키. */
-    record StartedResponse(Long id, String title, BroadcastStatus status, Instant startedAt, String publishKey,
-                           String whipUrl) {}
+    /** The 소유자 as every 방송 response shows it. */
+    record Owner(long id, String nickname) {
+        static Owner of(Broadcast b) {
+            MemberRef owner = b.getOwner();
+            return new Owner(owner.id(), owner.nickname());
+        }
+    }
+
+    /** With {@link PublishKeyResponse}, the only responses that carry a 송출 키. */
+    record StartedResponse(Long id, String title, BroadcastStatus status, Instant startedAt, Owner owner,
+                           String publishKey, String whipUrl) {}
+
+    record PublishKeyResponse(String publishKey, String whipUrl) {}
 
     /** A 방송 card in the 방송 목록; the player URL comes from the detail. */
-    record BroadcastSummary(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt) {
+    record BroadcastSummary(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt,
+                            Owner owner) {
         static BroadcastSummary of(Broadcast b) {
-            return new BroadcastSummary(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt());
+            return new BroadcastSummary(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt(),
+                    Owner.of(b));
         }
     }
 
     /** {@code whepUrl} is {@code null} unless the 방송 is 방송 중. */
     record BroadcastResponse(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt,
-                             String whepUrl) {}
+                             Owner owner, String whepUrl) {}
 }

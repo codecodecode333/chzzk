@@ -1,16 +1,20 @@
+import { isAxiosError } from 'axios'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { apiErrorMessage } from '../api/client'
-import { endBroadcast, getBroadcast, startBroadcast, type Broadcast } from '../api/broadcasts'
+import {
+  endBroadcast,
+  findLiveBroadcastOf,
+  getBroadcast,
+  issuePublishKey,
+  liveBroadcastConflict,
+  startBroadcast,
+} from '../api/broadcasts'
 import { validateTitle } from '../forms/title'
 import { ElapsedTimer } from '../broadcasts/ElapsedTimer'
 import { LiveBadge } from '../broadcasts/LiveBadge'
-import {
-  clearStoredBroadcast,
-  loadStoredBroadcast,
-  saveStoredBroadcast,
-  type StoredBroadcast,
-} from '../broadcasts/storedBroadcast'
+import { useCurrentMember } from '../members/currentMemberContext'
+import { withNext } from '../members/next'
 import {
   closeStream,
   MediaError,
@@ -43,11 +47,14 @@ interface LiveBroadcast {
   whipUrl: string
 }
 
-/** A 방송 this tab started before a reload, still 방송 중, that can be resumed. */
+/** The 회원's 방송 중 방송 that this screen isn't sending: "이어서 송출" publishes into it with a fresh 송출 키. */
 interface Resumable {
-  stored: StoredBroadcast
-  broadcast: Broadcast
+  id: number
+  title: string
+  startedAt: string
 }
+
+const STUDIO_PATH = '/broadcasts/new'
 
 const PUBLISH_FAILED = '송출을 시작하지 못했습니다.'
 
@@ -55,13 +62,23 @@ function publishErrorMessage(error: unknown): string {
   return error instanceof MediaError ? error.message : PUBLISH_FAILED
 }
 
+function isUnauthenticated(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 401
+}
+
 /**
- * 송출 screen (`/broadcasts/new`): camera preview → title → 방송 시작 → 방송 중 → 방송 종료 → 종료됨.
- * After a reload while 방송 중 it offers "이어서 송출", which republishes into the same 방송 (the server auto-ends a
- * 방송 only after 60s without media); leaving the page while 방송 중 asks first. When the publication drops it
- * re-reads the 방송: 종료 shows 종료됨, still 방송 중 offers "다시 연결" into the same 방송.
+ * 송출 screen (`/broadcasts/new`, 회원 only): camera preview → title → 방송 시작 → 방송 중 → 방송 종료 → 종료됨.
+ *
+ * The 송출 키 lives only in this screen's memory. When the 회원 already has a 방송 중 방송 (found on load, or a 409 on
+ * 방송 시작) it offers "이어서 송출": a fresh 송출 키 is issued (the old one, in another tab or device, stops working)
+ * and the camera republishes into that same 방송. Leaving the page while 방송 중 asks first. When the publication
+ * drops it re-reads the 방송: 종료 shows 종료됨, still 방송 중 offers "다시 연결" with the same key; if that key was
+ * replaced meanwhile, another tab took over and "여기서 이어서 송출" takes it back. 방송 종료 uses the login session:
+ * when it has expired, it asks to log in again (in a new tab) while publishing goes on.
  */
 export function BroadcastStudioPage() {
+  const { member } = useCurrentMember()
+  const memberId = member?.id
   const [camera, setCamera] = useState<MediaStream | null>(null)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [title, setTitle] = useState('')
@@ -73,8 +90,12 @@ export function BroadcastStudioPage() {
   const [live, setLive] = useState<LiveBroadcast | null>(null)
   /** The publication dropped while the 방송 is still 방송 중; "다시 연결" publishes again. */
   const [dropped, setDropped] = useState(false)
+  /** "다시 연결" was refused because another tab or device resumed this 방송 with a fresh 송출 키. */
+  const [takenOver, setTakenOver] = useState(false)
   const [ending, setEnding] = useState(false)
   const [endError, setEndError] = useState<string | null>(null)
+  /** 방송 종료 found the login session expired: log in again, then end; publishing goes on meanwhile. */
+  const [needsLogin, setNeedsLogin] = useState(false)
   const [ended, setEnded] = useState(false)
   const publication = useRef<Session | null>(null)
   const [facing, setFacing] = useState<Facing>('user')
@@ -86,23 +107,20 @@ export function BroadcastStudioPage() {
   const [resumable, setResumable] = useState<Resumable | null>(null)
 
   useEffect(() => {
-    const stored = loadStoredBroadcast()
-    if (!stored) return
+    if (memberId === undefined) return
     let active = true
-    getBroadcast(String(stored.id)).then(
-      (broadcast) => {
-        if (!active) return
-        if (broadcast?.status === 'LIVE') setResumable({ stored, broadcast })
-        else clearStoredBroadcast()
+    findLiveBroadcastOf(memberId).then(
+      (found) => {
+        if (active && found) setResumable({ id: found.id, title: found.title, startedAt: found.startedAt })
       },
       () => {
-        // Can't tell whether it is still 방송 중; offer a fresh start and keep it for the next load.
+        // Can't tell; offer a fresh start (a 409 on 방송 시작 then offers 이어서 송출 after all).
       },
     )
     return () => {
       active = false
     }
-  }, [])
+  }, [memberId])
 
   useEffect(() => {
     if (!live) return
@@ -176,15 +194,16 @@ export function BroadcastStudioPage() {
     )
   }
 
-  /** 종료됨: forgets the 방송, stops publishing and releases the camera. */
+  /** 종료됨: stops publishing and releases the camera. */
   function showEnded() {
-    clearStoredBroadcast()
     stopPublishing()
     closeStream(currentCamera.current)
     currentCamera.current = null
     setCamera(null)
     setLive(null)
     setDropped(false)
+    setTakenOver(false)
+    setNeedsLogin(false)
     setEnded(true)
   }
 
@@ -221,17 +240,17 @@ export function BroadcastStudioPage() {
         const started = await startBroadcast(title)
         target = { id: started.id, startedAt: started.startedAt, publishKey: started.publishKey, whipUrl: started.whipUrl }
       } catch (error) {
-        if (mounted.current) setStartError(apiErrorMessage(error))
+        const liveId = liveBroadcastConflict(error)
+        if (liveId !== null) await offerResume(liveId, apiErrorMessage(error))
+        else if (mounted.current) setStartError(apiErrorMessage(error))
         return
       }
-      saveStoredBroadcast({ id: target.id, publishKey: target.publishKey, whipUrl: target.whipUrl })
       try {
         if (!(await connect(camera, target))) return
       } catch (error) {
         // Nothing is being sent, so don't leave the 방송 listed as 방송 중 (best effort: without media the server
-        // auto-ends it within ~70s anyway), and don't offer to resume it.
-        clearStoredBroadcast()
-        endBroadcast(target.id, target.publishKey).catch(() => {})
+        // auto-ends it within ~70s anyway).
+        endBroadcast(target.id).catch(() => {})
         if (mounted.current) setStartError(publishErrorMessage(error))
         return
       }
@@ -241,75 +260,123 @@ export function BroadcastStudioPage() {
     }
   }
 
+  /** A 409 on 방송 시작: offer "이어서 송출" for the 회원's 방송 중 방송 instead. */
+  async function offerResume(id: number, message: string) {
+    try {
+      const broadcast = await getBroadcast(String(id))
+      if (!mounted.current) return
+      if (broadcast?.status === 'LIVE') {
+        setResumable({ id: broadcast.id, title: broadcast.title, startedAt: broadcast.startedAt })
+      }
+    } catch {
+      // Show the server's message alone.
+    }
+    if (mounted.current) setStartError(message)
+  }
+
   /**
-   * Publishes into a 방송 that is already 방송 중 ("이어서 송출" after a reload, "다시 연결" after a drop): same id,
-   * same start time. A 401 means it has ended meanwhile (e.g. auto-ended after 60s without media).
+   * Publishes into a 방송 that is already 방송 중 (same id, same start time). `refused` means the media server
+   * refused the 송출 키: the 방송 has ended meanwhile, or another tab resumed it with a fresh key.
    */
-  async function republish(target: LiveBroadcast): Promise<'published' | 'ended' | 'failed'> {
+  async function republish(target: LiveBroadcast): Promise<'published' | 'refused' | 'failed'> {
     if (!camera) return 'failed'
-    setStarting(true)
-    setStartError(null)
     try {
       return (await connect(camera, target)) ? 'published' : 'failed'
     } catch (error) {
-      if (error instanceof MediaError && error.status === 401) return 'ended'
+      if (error instanceof MediaError && error.status === 401) return 'refused'
       if (mounted.current) setStartError(publishErrorMessage(error))
       return 'failed'
+    }
+  }
+
+  /**
+   * "이어서 송출" (and "여기서 이어서 송출"): gets a fresh 송출 키 for the 방송 중 방송 `resumed`, which cuts off
+   * whoever published with the old one, then publishes the camera into it.
+   */
+  async function resume(resumed: Resumable) {
+    if (!camera || starting) return
+    setStarting(true)
+    setStartError(null)
+    try {
+      let target: LiveBroadcast
+      try {
+        const issued = await issuePublishKey(resumed.id)
+        target = { id: resumed.id, startedAt: resumed.startedAt, ...issued }
+      } catch (error) {
+        if (mounted.current) setStartError(apiErrorMessage(error))
+        return
+      }
+      if ((await republish(target)) !== 'published' || !mounted.current) return
+      setTitle(resumed.title)
+      setLive(target)
+      setResumable(null)
+      setDropped(false)
+      setTakenOver(false)
     } finally {
       if (mounted.current) setStarting(false)
     }
   }
 
-  async function handleResume() {
-    if (!resumable || starting) return
-    const { stored, broadcast } = resumable
-    const target = { id: broadcast.id, startedAt: broadcast.startedAt, publishKey: stored.publishKey, whipUrl: stored.whipUrl }
-    const result = await republish(target)
-    if (!mounted.current) return
-    if (result === 'ended') {
-      clearStoredBroadcast()
-      setResumable(null)
-      setStartError('이미 종료된 방송입니다. 새 방송을 시작해 주세요.')
-    } else if (result === 'published') {
-      setTitle(broadcast.title)
-      setLive(target)
-      setResumable(null)
-    }
-  }
-
   async function handleReconnect() {
     if (!live || starting) return
-    const result = await republish(live)
-    if (!mounted.current) return
-    if (result === 'ended') showEnded()
-    else if (result === 'published') setDropped(false)
+    setStarting(true)
+    setStartError(null)
+    try {
+      const result = await republish(live)
+      if (!mounted.current) return
+      if (result === 'published') setDropped(false)
+      else if (result === 'refused') await handleRefused(live.id)
+    } finally {
+      if (mounted.current) setStarting(false)
+    }
   }
 
-  /** "새 방송으로 시작": ends the stored 방송 first (best effort), so it doesn't linger as 방송 중, then forgets it. */
+  /** The 송출 키 was refused: 종료됨 if the 방송 has ended, otherwise another tab or device took it over. */
+  async function handleRefused(id: number) {
+    try {
+      const broadcast = await getBroadcast(String(id))
+      if (!mounted.current) return
+      if (broadcast?.status === 'LIVE') setTakenOver(true)
+      else showEnded()
+    } catch (error) {
+      if (mounted.current) setStartError(apiErrorMessage(error))
+    }
+  }
+
+  function handleTakeBack() {
+    if (live) void resume({ id: live.id, title, startedAt: live.startedAt })
+  }
+
+  /** "새 방송으로 시작": ends the 방송 중 방송 first, so it doesn't linger, then offers a fresh start. */
   async function handleStartOver() {
     if (!resumable || starting) return
-    const { stored } = resumable
     setStarting(true)
+    setStartError(null)
     try {
-      await endBroadcast(stored.id, stored.publishKey)
-    } catch {
-      // Without media the server auto-ends it within ~70s anyway.
+      await endBroadcast(resumable.id)
+      if (mounted.current) setResumable(null)
+    } catch (error) {
+      if (mounted.current) setStartError(apiErrorMessage(error))
+    } finally {
+      if (mounted.current) setStarting(false)
     }
-    clearStoredBroadcast()
-    if (!mounted.current) return
-    setStarting(false)
-    setResumable(null)
   }
 
-  /** Ends the 방송 (the server also cuts the media connection), then releases the camera. */
+  /**
+   * Ends the 방송 by the login session (the server also cuts the media connection), then releases the camera.
+   * An expired session asks to log in again; the 방송 keeps publishing meanwhile.
+   */
   async function handleEnd() {
     if (!live || ending || !window.confirm('방송을 종료할까요?')) return
     setEnding(true)
     setEndError(null)
+    setNeedsLogin(false)
     try {
-      await endBroadcast(live.id, live.publishKey)
+      await endBroadcast(live.id)
     } catch (error) {
-      if (mounted.current) setEndError(apiErrorMessage(error))
+      if (!mounted.current) return
+      if (isUnauthenticated(error)) setNeedsLogin(true)
+      else setEndError(apiErrorMessage(error))
       return
     } finally {
       if (mounted.current) setEnding(false)
@@ -381,17 +448,35 @@ export function BroadcastStudioPage() {
           </Link>
           {dropped && (
             <div role="alert" className="space-y-2 rounded border border-amber-700 bg-amber-950/40 p-3 text-sm text-amber-200">
-              <p>송출이 끊겼습니다. 방송은 아직 방송 중이니 다시 연결해 주세요.</p>
+              {takenOver ? (
+                <p>다른 탭이나 기기에서 이 방송을 이어서 송출하고 있어, 여기서는 송출이 멈췄습니다.</p>
+              ) : (
+                <p>송출이 끊겼습니다. 방송은 아직 방송 중이니 다시 연결해 주세요.</p>
+              )}
               {startError && <p className="text-red-400">{startError}</p>}
               <button
                 type="button"
-                onClick={handleReconnect}
+                onClick={takenOver ? handleTakeBack : handleReconnect}
                 disabled={!camera || starting}
                 className="w-full rounded bg-emerald-500 py-2 font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
               >
-                다시 연결
+                {takenOver ? '여기서 이어서 송출' : '다시 연결'}
               </button>
             </div>
+          )}
+          {needsLogin && (
+            <p role="alert" className="text-sm text-amber-200">
+              로그인이 만료되었습니다. 방송은 계속 송출 중입니다.{' '}
+              <a
+                href={withNext('/login', STUDIO_PATH)}
+                target="_blank"
+                rel="noopener"
+                className="font-semibold text-emerald-400 hover:underline"
+              >
+                다시 로그인
+              </a>
+              한 뒤 방송 종료를 다시 눌러 주세요.
+            </p>
           )}
           {endError && (
             <p role="alert" className="text-sm text-red-400">
@@ -410,7 +495,7 @@ export function BroadcastStudioPage() {
       ) : resumable ? (
         <div className="mt-4 space-y-3">
           <p className="text-zinc-300">
-            방송 중인 <strong className="text-zinc-100">{resumable.broadcast.title}</strong> 방송이 있습니다.
+            방송 중인 <strong className="text-zinc-100">{resumable.title}</strong> 방송이 있습니다.
           </p>
           {startError && (
             <p role="alert" className="text-sm text-red-400">
@@ -419,7 +504,7 @@ export function BroadcastStudioPage() {
           )}
           <button
             type="button"
-            onClick={handleResume}
+            onClick={() => void resume(resumable)}
             disabled={!camera || starting}
             className="w-full rounded bg-emerald-500 py-2.5 font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
           >

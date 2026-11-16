@@ -58,9 +58,12 @@ media flows directly between the device and MediaMTX over UDP 8189.
 
 MediaMTX asks the backend's internal callback (`POST /internal/mediamtx/auth?secret=<MEDIAMTX_AUTH_SECRET>`, not
 proxied) on every WHIP/WHEP request: a call without the shared secret is refused (the backend listens on every
-interface, so anyone on the LAN could otherwise ask it), publishing needs the 방송's 송출 키 as `Authorization: Bearer`,
+interface, so anyone on the LAN could otherwise ask it), publishing needs the 방송's current 송출 키 as `Authorization: Bearer`,
 and only a 방송 중 방송 can be published or watched. `compose.yaml` puts the secret into MediaMTX's callback address
-(`MTX_AUTHHTTPADDRESS`), since MediaMTX can't add headers. The backend reads MediaMTX's control API on `localhost:9997` (override with `MEDIAMTX_API_URL`).
+(`MTX_AUTHHTTPADDRESS`), since MediaMTX can't add headers. The 송출 키 only authenticates
+that media connection: only the logged-in 소유자 gets one (from 방송 시작, or a fresh one from "이어서 송출", which
+replaces the old key and cuts its publisher), the 송출 screen keeps it in memory only, and 방송 종료 uses the login
+session. The backend reads MediaMTX's control API on `localhost:9997` (override with `MEDIAMTX_API_URL`).
 Every 10s the publishing monitor asks that API which 방송 are receiving media; a 방송 중 방송 with no media for
 over 60s (or that never sent any) is ended automatically. While MediaMTX can't be asked, only 방송 that never sent
 any media are ended (for the others, silence can't be told from the outage).
@@ -71,26 +74,32 @@ Real WebRTC through MediaMTX isn't run in the automated tests, so check it by ha
 calling 라이브 done (ticket 07). Use two phones and a desktop browser; "list" is the 라이브 home (`/`).
 
 **A. Android Chrome as 송출자 → iPhone Safari and a desktop browser as 시청자**
-- [ ] On Android Chrome open `/broadcasts/new`, allow camera and microphone, enter a title, press 방송 시작: the
-      방송 중 badge and the 방송 경과 시간 timer appear.
+- [ ] On Android Chrome open `/broadcasts/new`: it asks to log in first. Log in as the 송출자 (회원 A), allow camera
+      and microphone, enter a title, press 방송 시작: the 방송 중 badge and the 방송 경과 시간 timer appear.
+- [ ] On iPhone Safari log in as another 회원 (B) and open the 시청 링크: it shows A's 닉네임 and no 송출 or 종료
+      controls; the desktop browser, logged out, shows the same.
 - [ ] Open the 시청 링크 on iPhone Safari and on the desktop: video plays muted with sub-second delay (wave a hand,
       or show a stopwatch on the 송출 phone and compare).
 - [ ] Press "소리 켜기" on each 시청자: sound plays.
 - [ ] Switch the camera (전면 ↔ 후면) on the 송출 phone while live: the 시청자 picture switches without reconnecting
       and the 방송 keeps its link and timer.
-- [ ] The list shows the 방송 under 방송 중 with the 방송 중 badge.
+- [ ] The list shows the 방송 under 방송 중 with the 방송 중 badge and A's 닉네임.
 - [ ] Press 방송 종료 and confirm: the 송출 phone shows 종료됨 and its camera turns off; every 시청자 switches to
       "종료된 방송입니다"; the list shows it under 종료된 방송 with the 종료 badge and both its start and end time.
 
 **B. iPhone Safari as 송출자 → Android Chrome as 시청자**
-- [ ] The same flow as A with the roles swapped: start, sub-second playback, "소리 켜기", camera switch while live,
-      방송 종료 → "종료된 방송입니다", and the list's 방송 중 / 종료 badges.
+- [ ] The same flow as A with the roles swapped (log in on the iPhone as the 송출자): start, sub-second playback,
+      "소리 켜기", camera switch while live, 방송 종료 → "종료된 방송입니다", and the list's 방송 중 / 종료 badges.
 
 **C. Interruptions** (either phone as 송출자, the other as 시청자)
 - [ ] Open the 시청 링크 before pressing 방송 시작 on a just-started 방송, or while the 송출자 reconnects: the 시청자
       shows "송출 준비 중…" and starts playing on its own once media flows.
 - [ ] Reload the 송출 page while live and press "이어서 송출" within 60s: the same 방송 continues (same 시청 링크, same
       start time) and the 시청자 recover on their own.
+- [ ] Resume on a second device: while the first phone is live, log in as the same 회원 on the other phone (or a
+      desktop browser), open `/broadcasts/new` and press "이어서 송출": the 방송 continues from the second device; the
+      first one shows "송출이 끊겼습니다", and its "다시 연결" says another device took over (its old 송출 키 is
+      refused). End the 방송 from either device.
 - [ ] Turn Wi-Fi off and on again on the 송출 phone: it shows "송출이 끊겼습니다"; "다시 연결" continues the same 방송.
 - [ ] Kill the 송출 tab (close it, or lock the phone): within about 70s the 방송 shows 종료 in the list and
       "종료된 방송입니다" for the 시청자.
@@ -106,7 +115,10 @@ also need the CSRF token (`403` without it); the frontend's HTTP client sends it
 | 로그아웃 (`POST /api/auth/logout`) | anyone (ends the session if there is one) | — |
 | Who am I (`GET /api/me`) | 회원 | `401` |
 | VOD 목록·상세·재생, 방송 목록·상세 | anyone | — |
-| VOD 등록, 방송 시작·종료 | anyone for now (ownership arrives with the next tickets) | — |
+| VOD 등록 | anyone for now (ownership arrives with the next tickets) | — |
+| 방송 시작 (`POST /api/broadcasts`) | 회원 (becomes its 소유자); one 방송 중 방송 per 회원 | `401`; `409` with `broadcastId` of the 방송 중 one |
+| 방송 종료 (`POST /api/broadcasts/{id}/end`) | the 소유자, by login session | `401` / `403` |
+| 이어서 송출 (`POST /api/broadcasts/{id}/publish-key`) | the 소유자, while 방송 중 | `401` / `403`; `409` once 종료 |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
 
 ## Tests

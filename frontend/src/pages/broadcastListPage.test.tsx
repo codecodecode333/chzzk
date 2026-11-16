@@ -20,14 +20,17 @@ interface Card {
   status: 'LIVE' | 'ENDED'
   startedAt: string
   endedAt: string | null
+  owner: { id: number; nickname: string }
 }
 
+const OWNER = { id: 9, nickname: '방송인' }
+
 function live(id: number, title: string, startedAt = '2026-11-15T10:00:00Z'): Card {
-  return { id, title, status: 'LIVE', startedAt, endedAt: null }
+  return { id, title, status: 'LIVE', startedAt, endedAt: null, owner: OWNER }
 }
 
 function ended(id: number, title: string, endedAt = '2026-11-15T09:30:00Z'): Card {
-  return { id, title, status: 'ENDED', startedAt: '2026-11-15T09:00:00Z', endedAt }
+  return { id, title, status: 'ENDED', startedAt: '2026-11-15T09:00:00Z', endedAt, owner: OWNER }
 }
 
 function pageOf(content: Card[], page = 0, totalElements = content.length) {
@@ -69,6 +72,7 @@ describe('방송 목록 home', () => {
     expect(liveCard).toHaveAttribute('href', '/broadcasts/3')
     expect(liveCard).toHaveTextContent('방송 중')
     expect(liveCard).toHaveTextContent('19:00') // started 10:00Z = 19:00 KST
+    expect(liveCard).toHaveTextContent('방송인')
 
     const endedCard = await within(endedSection).findByRole('link', { name: /끝난 방송/ })
     expect(endedCard).toHaveAttribute('href', '/broadcasts/1')

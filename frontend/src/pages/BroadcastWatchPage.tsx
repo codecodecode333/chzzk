@@ -4,6 +4,7 @@ import { apiErrorMessage } from '../api/client'
 import { getBroadcast, type Broadcast } from '../api/broadcasts'
 import { LiveBadge } from '../broadcasts/LiveBadge'
 import { formatDateTime } from '../format'
+import { useCurrentMember } from '../members/currentMemberContext'
 import { watch } from '../media/media'
 import { LoadError } from './LoadError'
 
@@ -47,7 +48,10 @@ export function BroadcastWatchPage() {
     }
   }, [id])
 
+  const { member } = useCurrentMember()
   const live = broadcast?.status === 'LIVE'
+  /** The 소유자's controls show only to the 소유자 (the server stays the authority). */
+  const isOwner = member !== null && broadcast?.owner.id === member.id
   useEffect(() => {
     if (!live) return
     const timer = setInterval(() => refreshRef.current(), STATUS_POLL_MS)
@@ -84,6 +88,12 @@ export function BroadcastWatchPage() {
         {broadcast.status === 'LIVE' && <LiveBadge />}
         <h1 className="text-2xl font-bold">{broadcast.title}</h1>
       </div>
+      <p className="mt-1 text-zinc-300">{broadcast.owner.nickname}</p>
+      {isOwner && live && (
+        <Link to="/broadcasts/new" className="text-sm text-emerald-400 hover:underline">
+          송출 화면으로
+        </Link>
+      )}
       <p className="flex gap-3 text-sm text-zinc-400">
         <time dateTime={broadcast.startedAt}>시작 {formatDateTime(broadcast.startedAt)}</time>
         {broadcast.endedAt && <time dateTime={broadcast.endedAt}>종료 {formatDateTime(broadcast.endedAt)}</time>}

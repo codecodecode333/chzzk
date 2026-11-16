@@ -1,7 +1,13 @@
 package com.chzzk.broadcast.domain;
 
 import com.chzzk.broadcast.media.MediaServerGateway;
+import com.chzzk.common.auth.CurrentMember;
+import com.chzzk.common.auth.MemberRef;
+import com.chzzk.common.error.ConflictException;
+import com.chzzk.common.error.ForbiddenException;
 import com.chzzk.common.text.Title;
+import com.chzzk.member.domain.Member;
+import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -11,6 +17,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -20,6 +27,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The broadcast lifecycle: the single owner of 방송 status rules, the 송출 키 and who may publish or read.
+ *
+ * <p>Who may control a 방송 is decided here too: only a logged-in 회원 starts one and becomes its 소유자 (and 송출자),
+ * and only the 소유자, by their login session ({@link CurrentMember}), ends it or gets a fresh 송출 키. The 송출 키
+ * itself only authenticates the media connection (the MediaMTX auth callback, {@link #authorizePublish}).
  *
  * <p>State lives only in the database, so it survives restarts. Time comes from the injected {@link Clock}.
  * The 60-second auto-end ({@link #sweep}) works the same way: it reads every 방송 중 방송 from the database.
@@ -36,25 +47,55 @@ public class BroadcastLifecycle {
     private final Clock clock;
     private final MediaServerGateway mediaServer;
     private final TransactionTemplate transaction;
+    private final CurrentMember currentMember;
+    private final EntityManager entityManager;
+
+    static final String ALREADY_LIVE = "이미 방송 중인 방송이 있습니다. 진행 중인 방송을 이어서 송출해 주세요.";
+    static final String NOT_OWNER = "내 방송만 제어할 수 있습니다.";
+    static final String NOT_LIVE = "이미 종료된 방송입니다.";
 
     BroadcastLifecycle(BroadcastRepository repository, Clock clock, MediaServerGateway mediaServer,
-                       TransactionTemplate transaction) {
+                       TransactionTemplate transaction, CurrentMember currentMember, EntityManager entityManager) {
         this.repository = repository;
         this.clock = clock;
         this.mediaServer = mediaServer;
         this.transaction = transaction;
+        this.currentMember = currentMember;
+        this.entityManager = entityManager;
     }
 
     /** A just-started 방송 and its 송출 키, which is handed out only this once. */
     public record Started(Broadcast broadcast, PublishKey publishKey) {}
 
-    /** "방송 시작": a new 방송 중 방송 with a fresh 송출 키. */
-    @Transactional
+    /**
+     * "방송 시작" by the logged-in 회원 (401 otherwise), who becomes its 소유자: a new 방송 중 방송 with a fresh 송출 키.
+     * A 회원 who already has a 방송 중 방송 gets a {@link ConflictException} carrying its id as {@code broadcastId},
+     * so the client can offer to resume it; the partial unique index settles concurrent starts the same way.
+     */
     public Started start(String title) {
-        title = Title.normalize(title, message -> new InvalidBroadcastException("title", message));
-        PublishKey publishKey = PublishKey.generate();
-        Broadcast broadcast = repository.save(new Broadcast(title, publishKey.hash(), now()));
-        return new Started(broadcast, publishKey);
+        MemberRef owner = currentMember.require();
+        String normalized = Title.normalize(title, message -> new InvalidBroadcastException("title", message));
+        try {
+            return transaction.execute(tx -> {
+                repository.findFirstByOwnerIdAndStatus(owner.id(), BroadcastStatus.LIVE).ifPresent(live -> {
+                    throw alreadyLive(live.getId());
+                });
+                PublishKey publishKey = PublishKey.generate();
+                Member member = entityManager.find(Member.class, owner.id());
+                Broadcast broadcast = repository.saveAndFlush(
+                        new Broadcast(member, normalized, publishKey.hash(), now()));
+                return new Started(broadcast, publishKey);
+            });
+        } catch (DataIntegrityViolationException raced) {
+            long liveId = repository.findFirstByOwnerIdAndStatus(owner.id(), BroadcastStatus.LIVE)
+                    .map(Broadcast::getId)
+                    .orElseThrow(() -> raced);
+            throw alreadyLive(liveId);
+        }
+    }
+
+    private static ConflictException alreadyLive(long id) {
+        return new ConflictException(ALREADY_LIVE).with("broadcastId", id);
     }
 
     @Transactional(readOnly = true)
@@ -68,29 +109,54 @@ public class BroadcastLifecycle {
         ENDED,
         /** Had already ended (by the 송출자 or the auto-end); ending twice is harmless and changes nothing. */
         ALREADY_ENDED,
-        /** The 송출 키 is missing or belongs to another 방송; nothing changed. */
-        WRONG_KEY,
         NOT_FOUND
     }
 
     /**
      * "방송 종료" by the 송출자: 방송 중 → 종료 with {@code ended_at = now}, then the publisher's media connection is cut
-     * (which also drops its viewers). Only the 송출 키 holder may end; ending an ended 방송 keeps its {@code ended_at}.
+     * (which also drops its viewers). Only the 소유자 may end, by their login session (401 for a visitor, 403 for
+     * another 회원); ending an ended 방송 keeps its {@code ended_at}.
      *
      * <p>Racing the auto-end, exactly one of them ends the 방송 (and sets {@code ended_at}); only that one kicks.
      * The kick happens after the commit and is best effort: if the media server is unreachable, the 방송 is still
      * 종료, and the auth callback already refuses any re-publish or new viewer.
      */
-    public EndResult end(long id, PublishKey publishKey) {
+    public EndResult end(long id) {
+        MemberRef member = currentMember.require();
         EndResult result = transaction.execute(tx -> repository.findById(id)
                 .map(b -> {
-                    if (!publishKey.matches(b.getPublishKeyHash())) return EndResult.WRONG_KEY;
+                    requireOwner(b, member);
                     boolean endedNow = repository.endIfLive(id, now(), BroadcastStatus.LIVE, BroadcastStatus.ENDED) == 1;
                     return endedNow ? EndResult.ENDED : EndResult.ALREADY_ENDED;
                 })
                 .orElse(EndResult.NOT_FOUND));
         if (result == EndResult.ENDED) kickPublisher(id);
         return result;
+    }
+
+    /**
+     * "이어서 송출": a fresh 송출 키 for the 소유자's 방송 중 방송 (401/403 otherwise, 409 once it has ended). Only the
+     * new key's hash is stored, so the previous key stops working at once, and a publisher still connected with it
+     * is cut (best effort, after the commit) so the new one takes over.
+     *
+     * @return the new key, or empty for an unknown 방송
+     */
+    public Optional<PublishKey> issuePublishKey(long id) {
+        MemberRef member = currentMember.require();
+        Optional<PublishKey> issued = transaction.execute(tx -> repository.findById(id).map(b -> {
+            requireOwner(b, member);
+            PublishKey publishKey = PublishKey.generate();
+            if (repository.replacePublishKeyIfLive(id, publishKey.hash(), BroadcastStatus.LIVE) == 0) {
+                throw new ConflictException(NOT_LIVE);
+            }
+            return publishKey;
+        }));
+        if (issued.isPresent()) kickPublisher(id);
+        return issued;
+    }
+
+    private static void requireOwner(Broadcast broadcast, MemberRef member) {
+        if (!broadcast.isOwnedBy(member)) throw new ForbiddenException(NOT_OWNER);
     }
 
     private void kickPublisher(long id) {
@@ -141,14 +207,17 @@ public class BroadcastLifecycle {
         return ended;
     }
 
-    /** 방송 중 newest started first; 종료 most recently ended first. */
+    /** 방송 중 newest started first; 종료 most recently ended first. With an {@code ownerId}, only that 회원's. */
     @Transactional(readOnly = true)
-    public Page<Broadcast> list(BroadcastStatus status, int page, int size) {
+    public Page<Broadcast> list(BroadcastStatus status, Long ownerId, int page, int size) {
         Sort order = switch (status) {
             case LIVE -> Sort.by(Sort.Order.desc("startedAt"), Sort.Order.desc("id"));
             case ENDED -> Sort.by(Sort.Order.desc("endedAt"), Sort.Order.desc("id"));
         };
-        return repository.findByStatus(status, PageRequest.of(page, size, order));
+        PageRequest request = PageRequest.of(page, size, order);
+        return ownerId == null
+                ? repository.findByStatus(status, request)
+                : repository.findByStatusAndOwnerId(status, ownerId, request);
     }
 
     /** Publishing is allowed only to a 방송 중 방송, and only with its 송출 키. */

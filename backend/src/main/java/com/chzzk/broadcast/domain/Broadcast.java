@@ -1,5 +1,7 @@
 package com.chzzk.broadcast.domain;
 
+import com.chzzk.common.auth.MemberRef;
+import com.chzzk.member.domain.Member;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -7,6 +9,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
@@ -24,6 +28,11 @@ public class Broadcast {
 
     @Column(nullable = false, length = 100)
     private String title;
+
+    /** The 소유자, who is also its 송출자. Loaded with the 방송 so its 닉네임 can always be shown. */
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "owner_id", nullable = false, updatable = false)
+    private Member owner;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -44,7 +53,8 @@ public class Broadcast {
 
     protected Broadcast() {}
 
-    Broadcast(String title, String publishKeyHash, Instant startedAt) {
+    Broadcast(Member owner, String title, String publishKeyHash, Instant startedAt) {
+        this.owner = owner;
         this.title = title;
         this.publishKeyHash = publishKeyHash;
         this.status = BroadcastStatus.LIVE;
@@ -53,6 +63,7 @@ public class Broadcast {
 
     public Long getId() { return id; }
     public String getTitle() { return title; }
+    public MemberRef getOwner() { return owner.toRef(); }
     public BroadcastStatus getStatus() { return status; }
     public Instant getStartedAt() { return startedAt; }
     public Instant getEndedAt() { return endedAt; }
@@ -60,6 +71,10 @@ public class Broadcast {
 
     public boolean isLive() {
         return status == BroadcastStatus.LIVE;
+    }
+
+    boolean isOwnedBy(MemberRef member) {
+        return owner.getId() == member.id();
     }
 
     String getPublishKeyHash() { return publishKeyHash; }

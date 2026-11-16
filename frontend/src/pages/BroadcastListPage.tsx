@@ -131,6 +131,7 @@ function BroadcastCard({ broadcast: b }: { broadcast: BroadcastSummary }) {
             {isLive ? <LiveBadge /> : <EndedBadge />}
             <h3 className="truncate font-semibold">{b.title}</h3>
           </div>
+          <p className="truncate text-sm text-zinc-300">{b.owner.nickname}</p>
           <p className="flex flex-wrap gap-x-3 text-sm text-zinc-400">
             <span>
               <time dateTime={b.startedAt}>{formatDateTime(b.startedAt)}</time> 시작

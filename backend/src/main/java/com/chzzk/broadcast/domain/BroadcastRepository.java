@@ -3,8 +3,10 @@ package com.chzzk.broadcast.domain;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -16,7 +18,19 @@ import org.springframework.data.jpa.repository.Query;
  */
 interface BroadcastRepository extends JpaRepository<Broadcast, Long> {
 
+    @EntityGraph(attributePaths = "owner")
     Page<Broadcast> findByStatus(BroadcastStatus status, Pageable pageable);
+
+    @EntityGraph(attributePaths = "owner")
+    Page<Broadcast> findByStatusAndOwnerId(BroadcastStatus status, long ownerId, Pageable pageable);
+
+    /** A 회원's 방송 중 방송, if any (there is at most one). */
+    Optional<Broadcast> findFirstByOwnerIdAndStatus(long ownerId, BroadcastStatus status);
+
+    /** A new 송출 키 hash for a 방송 중 방송; 0 when it is not 방송 중 (any more). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Broadcast b set b.publishKeyHash = :hash where b.id = :id and b.status = :live")
+    int replacePublishKeyIfLive(long id, String hash, BroadcastStatus live);
 
     @Modifying
     @Query("update Broadcast b set b.lastPublishingAt = :at where b.id in :ids and b.status = :live")

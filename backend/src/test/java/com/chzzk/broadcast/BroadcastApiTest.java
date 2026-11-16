@@ -64,16 +64,20 @@ class BroadcastApiTest {
 
     static final ParameterizedTypeReference<Map<String, Object>> JSON = new ParameterizedTypeReference<>() {};
 
-    private ApiSession browser;
+    private ApiSession owner;
 
-    /** The browser the writes come from: a visitor with a CSRF token (방송 need no login yet). */
-    ApiSession browser() {
-        if (browser == null) browser = ApiSession.visitor(http);
-        return browser;
+    /** The 회원 the test acts as by default: a fresh one per test, signed up and logged in through the auth API. */
+    ApiSession owner() {
+        if (owner == null) owner = ApiSession.member(http);
+        return owner;
     }
 
     ResponseEntity<Map<String, Object>> start(String title) {
-        return browser().exchange("/api/broadcasts", HttpMethod.POST, Map.of("title", title), JSON);
+        return startAs(owner(), title);
+    }
+
+    ResponseEntity<Map<String, Object>> startAs(ApiSession who, String title) {
+        return who.exchange("/api/broadcasts", HttpMethod.POST, Map.of("title", title), JSON);
     }
 
     @Test
@@ -100,20 +104,25 @@ class BroadcastApiTest {
         return http.exchange("/api/broadcasts/" + id, HttpMethod.GET, null, JSON);
     }
 
-    /** 송출 키 of every 방송 started through {@link #startedId}, so tests can end them through the API. */
-    final Map<Long, String> publishKeys = new java.util.HashMap<>();
+    /** 송출 키 and 소유자 of every 방송 started through {@link #startedId}. */
+    final Map<Long, String> publishKeys = new java.util.concurrent.ConcurrentHashMap<>();
+    final Map<Long, ApiSession> owners = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** Starts a 방송 as a fresh 회원 of its own (a 회원 has at most one 방송 중 방송). */
     long startedId(String title) {
-        Map<String, Object> body = start(title).getBody();
-        long id = ((Number) body.get("id")).longValue();
-        publishKeys.put(id, (String) body.get("publishKey"));
+        ApiSession who = ApiSession.member(http);
+        ResponseEntity<Map<String, Object>> response = startAs(who, title);
+        assertThat(response.getStatusCode()).as("start: %s", response.getBody()).isEqualTo(HttpStatus.CREATED);
+        long id = ((Number) response.getBody().get("id")).longValue();
+        publishKeys.put(id, (String) response.getBody().get("publishKey"));
+        owners.put(id, who);
         return id;
     }
 
-    /** Ends a 방송 started by {@link #startedId} through the end API, at the given moment. */
+    /** Ends a 방송 started by {@link #startedId} through the end API as its 소유자, at the given moment. */
     void endAt(long id, Instant endedAt) {
         clock.set(endedAt);
-        assertThat(end(id, publishKeys.get(id)).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(endAs(owners.get(id), id).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
     }
 
     /** What MediaMTX sends to the internal auth callback for one WHIP (publish) or WHEP (read) request. */
@@ -131,11 +140,19 @@ class BroadcastApiTest {
         return HttpStatus.valueOf(response.getStatusCode().value());
     }
 
-    ResponseEntity<Map<String, Object>> end(Object id, String publishKey) {
-        HttpHeaders headers = new HttpHeaders();
-        if (publishKey != null) headers.setBearerAuth(publishKey);
-        return browser().exchange("/api/broadcasts/" + id + "/end", HttpMethod.POST, new HttpEntity<>(headers),
-                JSON);
+    /** "방송 종료" as {@code who}, by its login session. */
+    ResponseEntity<Map<String, Object>> endAs(ApiSession who, Object id) {
+        return who.exchange("/api/broadcasts/" + id + "/end", HttpMethod.POST, null, JSON);
+    }
+
+    /** "방송 종료" by the default {@link #owner()}. */
+    ResponseEntity<Map<String, Object>> end(Object id) {
+        return endAs(owner(), id);
+    }
+
+    /** "이어서 송출": a fresh 송출 키 for {@code who}. */
+    ResponseEntity<Map<String, Object>> issuePublishKeyAs(ApiSession who, Object id) {
+        return who.exchange("/api/broadcasts/" + id + "/publish-key", HttpMethod.POST, null, JSON);
     }
 
     static void assertProblem(ResponseEntity<Map<String, Object>> response, HttpStatus status) {
@@ -181,7 +198,7 @@ class BroadcastApiTest {
         Map<String, Object> started = start("끝난 방송").getBody();
         Object id = started.get("id");
         clock.set(Instant.parse("2026-11-15T12:30:00Z"));
-        end(id, (String) started.get("publishKey"));
+        end(id);
 
         ResponseEntity<Map<String, Object>> response = detail(id);
 
@@ -203,7 +220,7 @@ class BroadcastApiTest {
         Map<String, Object> started = start("송출 권한").getBody();
         long id = ((Number) started.get("id")).longValue();
         String key = (String) started.get("publishKey");
-        String otherKey = (String) start("다른 방송").getBody().get("publishKey");
+        String otherKey = publishKeys.get(startedId("다른 방송"));
 
         assertThat(mediaServerAsks("publish", "broadcasts/" + id, key)).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(mediaServerAsks("publish", "broadcasts/" + id, otherKey)).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -211,7 +228,7 @@ class BroadcastApiTest {
         assertThat(mediaServerAsks("publish", "broadcasts/987654321", key)).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(mediaServerAsks("publish", "elsewhere/" + id, key)).isEqualTo(HttpStatus.UNAUTHORIZED);
 
-        end(id, key);
+        end(id);
         assertThat(mediaServerAsks("publish", "broadcasts/" + id, key)).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
@@ -224,7 +241,7 @@ class BroadcastApiTest {
         assertThat(mediaServerAsks("read", "broadcasts/987654321", "")).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(mediaServerAsks("playback", "broadcasts/" + id, "")).isEqualTo(HttpStatus.UNAUTHORIZED);
 
-        end(id, (String) started.get("publishKey"));
+        end(id);
         assertThat(mediaServerAsks("read", "broadcasts/" + id, "")).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
@@ -244,14 +261,14 @@ class BroadcastApiTest {
     }
 
     @Test
-    void endingWithThePublishKeyEndsTheBroadcastAndCutsThePublisher() {
+    void endingByTheOwnerEndsTheBroadcastAndCutsThePublisher() {
         clock.set(Instant.parse("2026-11-15T13:00:00Z"));
         Map<String, Object> started = start("끝낼 방송").getBody();
         long id = ((Number) started.get("id")).longValue();
         mediaServer.startPublishing(id);
         clock.set(Instant.parse("2026-11-15T13:42:00Z"));
 
-        ResponseEntity<Map<String, Object>> response = end(id, (String) started.get("publishKey"));
+        ResponseEntity<Map<String, Object>> response = end(id);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(detail(id).getBody())
@@ -262,22 +279,119 @@ class BroadcastApiTest {
     }
 
     @Test
-    void onlyThePublishKeyHolderCanEndABroadcast() {
-        long id = startedId("남이 못 끄는 방송");
-        String otherKey = (String) start("다른 방송").getBody().get("publishKey");
+    void startingABroadcastRequiresLogin() {
+        ApiSession visitor = ApiSession.visitor(http);
 
-        assertProblem(end(id, null), HttpStatus.UNAUTHORIZED);
-        assertProblem(end(id, otherKey), HttpStatus.UNAUTHORIZED);
+        ResponseEntity<Map<String, Object>> response = startAs(visitor, "익명 방송");
 
+        assertProblem(response, HttpStatus.UNAUTHORIZED);
+        assertThat(titles(list("?status=LIVE&size=100"))).doesNotContain("익명 방송");
+    }
+
+    @Test
+    void theStarterIsTheOwnerShownInListAndDetail() {
+        ApiSession.Member me = owner().member();
+        long id = ((Number) start("내 방송").getBody().get("id")).longValue();
+
+        Map<String, Object> expectedOwner = Map.of("id", (int) me.id(), "nickname", me.nickname());
+        assertThat(detail(id).getBody()).containsEntry("owner", expectedOwner);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> cards = (List<Map<String, Object>>) list("?status=LIVE&size=100").getBody()
+                .get("content");
+        assertThat(cards).filteredOn(c -> ((Number) c.get("id")).longValue() == id)
+                .singleElement().satisfies(c -> assertThat(c).containsEntry("owner", expectedOwner));
+    }
+
+    @Test
+    void aSecondLiveBroadcastIsRefusedWithTheIdOfTheLiveOne() {
+        long live = ((Number) start("진행 중").getBody().get("id")).longValue();
+
+        ResponseEntity<Map<String, Object>> second = start("두 번째");
+
+        assertProblem(second, HttpStatus.CONFLICT);
+        assertThat(second.getBody()).containsEntry("broadcastId", (int) live);
+        assertThat(titles(list("?status=LIVE&size=100"))).doesNotContain("두 번째");
+
+        end(live);
+        assertThat(start("끝내고 새로").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void theLiveBroadcastsOfOneOwnerCanBeListed() {
+        long mine = ((Number) start("내 방송 중").getBody().get("id")).longValue();
+        startedId("남의 방송 중");
+
+        ResponseEntity<Map<String, Object>> page = list("?status=LIVE&ownerId=" + owner().member().id());
+
+        assertThat(titles(page)).containsExactly("내 방송 중");
+        end(mine);
+        assertThat(titles(list("?status=LIVE&ownerId=" + owner().member().id()))).isEmpty();
+    }
+
+    @Test
+    void onlyTheOwnerCanEndABroadcastBySession() {
+        Map<String, Object> started = start("남이 못 끄는 방송").getBody();
+        long id = ((Number) started.get("id")).longValue();
+        String publishKey = (String) started.get("publishKey"); // the 송출 키 no longer ends a 방송
+        ApiSession visitor = ApiSession.visitor(http);
+        HttpHeaders bearer = new HttpHeaders();
+        bearer.setBearerAuth(publishKey);
+
+        assertProblem(endAs(visitor, id), HttpStatus.UNAUTHORIZED);
+        assertProblem(visitor.exchange("/api/broadcasts/" + id + "/end", HttpMethod.POST, new HttpEntity<>(bearer),
+                JSON), HttpStatus.UNAUTHORIZED);
+        assertProblem(endAs(ApiSession.member(http), id), HttpStatus.FORBIDDEN);
         assertThat(detail(id).getBody()).containsEntry("status", "LIVE");
         assertThat(mediaServer.kicked()).doesNotContain(id);
+
+        assertThat(end(id).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(detail(id).getBody()).containsEntry("status", "ENDED");
+        assertProblem(endAs(ApiSession.member(http), id), HttpStatus.FORBIDDEN);
     }
 
     @Test
     void endingAnUnknownBroadcastIsProblemDetails404() {
-        String key = (String) start("아무 방송").getBody().get("publishKey");
+        assertProblem(end(987654321), HttpStatus.NOT_FOUND);
+    }
 
-        assertProblem(end(987654321, key), HttpStatus.NOT_FOUND);
+    @Test
+    void resumingIssuesAFreshPublishKeyAndTheOldOneStopsWorking() {
+        Map<String, Object> started = start("이어서 송출").getBody();
+        long id = ((Number) started.get("id")).longValue();
+        String oldKey = (String) started.get("publishKey");
+        mediaServer.startPublishing(id);
+        String path = "broadcasts/" + id;
+        assertThat(mediaServerAsks("publish", path, oldKey)).isEqualTo(HttpStatus.NO_CONTENT);
+
+        ResponseEntity<Map<String, Object>> resumed = issuePublishKeyAs(owner(), id);
+
+        assertThat(resumed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(resumed.getBody()).containsEntry("whipUrl", "/live/broadcasts/" + id + "/whip");
+        String newKey = (String) resumed.getBody().get("publishKey");
+        assertThat(Base64.getUrlDecoder().decode(newKey)).hasSize(32);
+        assertThat(newKey).isNotEqualTo(oldKey);
+        assertThat(mediaServerAsks("publish", path, oldKey)).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(mediaServerAsks("publish", path, newKey)).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(mediaServer.kicked()).as("the old key's publisher is cut").contains(id);
+        assertThat(detail(id).getBody()).containsEntry("status", "LIVE").doesNotContainKey("publishKey");
+    }
+
+    @Test
+    void onlyTheOwnerOfALiveBroadcastCanGetAPublishKey() {
+        Map<String, Object> started = start("내 키").getBody();
+        long id = ((Number) started.get("id")).longValue();
+        String key = (String) started.get("publishKey");
+
+        assertProblem(issuePublishKeyAs(ApiSession.visitor(http), id), HttpStatus.UNAUTHORIZED);
+        assertProblem(issuePublishKeyAs(ApiSession.member(http), id), HttpStatus.FORBIDDEN);
+        assertProblem(issuePublishKeyAs(owner(), 987654321), HttpStatus.NOT_FOUND);
+        assertThat(mediaServerAsks("publish", "broadcasts/" + id, key)).as("refusals change nothing")
+                .isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(mediaServer.kicked()).doesNotContain(id);
+
+        end(id);
+        assertProblem(issuePublishKeyAs(owner(), id), HttpStatus.CONFLICT);
+        assertThat(mediaServerAsks("publish", "broadcasts/" + id, key)).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -286,10 +400,10 @@ class BroadcastApiTest {
         Map<String, Object> started = start("두 번 끄기").getBody();
         Object id = started.get("id");
         String key = (String) started.get("publishKey");
-        end(id, key);
+        end(id);
         clock.set(Instant.parse("2026-11-15T14:05:00Z"));
 
-        ResponseEntity<Map<String, Object>> again = end(id, key);
+        ResponseEntity<Map<String, Object>> again = end(id);
 
         assertThat(again.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(detail(id).getBody())
@@ -520,7 +634,7 @@ class BroadcastApiTest {
             for (long id : ids) {
                 work.add(pool.submit(() -> {
                     go.await();
-                    return end(id, publishKeys.get(id)).getStatusCode();
+                    return endAs(owners.get(id), id).getStatusCode();
                 }));
             }
             for (int i = 0; i < 4; i++) {

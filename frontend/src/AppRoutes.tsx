@@ -1,6 +1,7 @@
 import { Link, NavLink, Route, Routes } from 'react-router'
 import { CurrentMemberProvider } from './members/CurrentMember'
 import { MemberMenu } from './members/MemberMenu'
+import { RequireMember } from './members/RequireMember'
 import { BroadcastListPage } from './pages/BroadcastListPage'
 import { BroadcastStudioPage } from './pages/BroadcastStudioPage'
 import { BroadcastWatchPage } from './pages/BroadcastWatchPage'
@@ -55,7 +56,14 @@ export function AppRoutes() {
             <Route path="/vods" element={<VodListPage />} />
             <Route path="/vods/new" element={<RegisterVodPage />} />
             <Route path="/vods/:id" element={<VodDetailPage />} />
-            <Route path="/broadcasts/new" element={<BroadcastStudioPage />} />
+            <Route
+              path="/broadcasts/new"
+              element={
+                <RequireMember>
+                  <BroadcastStudioPage />
+                </RequireMember>
+              }
+            />
             <Route path="/broadcasts/:id" element={<BroadcastWatchPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
