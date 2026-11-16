@@ -20,6 +20,12 @@ interface CommentRepository extends JpaRepository<Comment, Long> {
     @Query(VIEW + "where c.broadcastId = :broadcastId and c.id < :before order by c.id desc")
     List<CommentView> findOnBroadcast(long broadcastId, long before, Limit limit);
 
+    @Query(VIEW + "where c.vodId = :vodId and c.id > :after order by c.id asc")
+    List<CommentView> findOnVodAfter(long vodId, long after, Limit limit);
+
+    @Query(VIEW + "where c.broadcastId = :broadcastId and c.id > :after order by c.id asc")
+    List<CommentView> findOnBroadcastAfter(long broadcastId, long after, Limit limit);
+
     @Query(value = "select exists (select 1 from vod where id = :id)", nativeQuery = true)
     boolean vodExists(long id);
 

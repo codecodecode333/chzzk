@@ -112,6 +112,24 @@ class BroadcastCommentApiTest {
     }
 
     @Test
+    void newerCommentsAfterACursorArePagedFromTheCursorUpSoPollingMissesNone() {
+        long id = live().id();
+        ApiSession member = ApiSession.member(http);
+        Object firstId = member.post(commentsOf(id), Map.of("content", "첫째")).getBody().get("id");
+        for (String text : List.of("둘째", "셋째", "넷째")) member.post(commentsOf(id), Map.of("content", text));
+        ApiSession visitor = ApiSession.visitor(http);
+
+        ResponseEntity<Map<String, Object>> first = visitor.get(commentsOf(id) + "?size=2&after=" + firstId);
+        assertThat(contents(first)).containsExactly("셋째", "둘째");
+        Object nextAfter = first.getBody().get("nextAfter");
+        assertThat(nextAfter).isEqualTo(content(first).getFirst().get("id"));
+
+        ResponseEntity<Map<String, Object>> second = visitor.get(commentsOf(id) + "?size=2&after=" + nextAfter);
+        assertThat(contents(second)).containsExactly("넷째");
+        assertThat(second.getBody()).containsEntry("nextAfter", null).containsEntry("nextBefore", null);
+    }
+
+    @Test
     void commentsOnAnotherBroadcastAreNotListed() {
         long mine = live().id();
         long other = live().id();

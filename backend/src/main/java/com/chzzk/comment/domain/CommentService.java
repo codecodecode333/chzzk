@@ -42,9 +42,28 @@ public class CommentService {
             case CommentTarget.Vod vod -> repository.findOnVod(vod.id(), cursor, limit);
             case CommentTarget.Broadcast broadcast -> repository.findOnBroadcast(broadcast.id(), cursor, limit);
         };
-        if (found.size() <= size) return new CommentPage(found, null);
+        if (found.size() <= size) return new CommentPage(found, null, null);
         List<CommentView> page = List.copyOf(found.subList(0, size));
-        return new CommentPage(page, page.getLast().id());
+        return new CommentPage(page, page.getLast().id(), null);
+    }
+
+    /**
+     * The {@code size} 댓글 right after {@code after} (the oldest of those newer than it), still newest first, so a
+     * poller that keeps passing {@code nextAfter} gets every newer 댓글 exactly once however many arrived meanwhile.
+     * Unknown target: {@code 404}.
+     *
+     * @param after the newest id the caller has read (0 for none)
+     */
+    @Transactional(readOnly = true)
+    public CommentPage listAfter(CommentTarget target, long after, int size) {
+        requireExists(target);
+        Limit limit = Limit.of(size + 1); // one extra tells whether a newer page exists
+        List<CommentView> found = switch (target) {
+            case CommentTarget.Vod vod -> repository.findOnVodAfter(vod.id(), after, limit);
+            case CommentTarget.Broadcast broadcast -> repository.findOnBroadcastAfter(broadcast.id(), after, limit);
+        };
+        List<CommentView> page = found.subList(0, Math.min(size, found.size())).reversed();
+        return new CommentPage(List.copyOf(page), null, found.size() > size ? page.getFirst().id() : null);
     }
 
     /** The current 회원 writes a 댓글 on the target; a visitor gets {@code 401}. */

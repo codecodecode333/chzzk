@@ -4,6 +4,7 @@ import com.chzzk.comment.domain.CommentPage;
 import com.chzzk.comment.domain.CommentService;
 import com.chzzk.comment.domain.CommentTarget;
 import com.chzzk.comment.domain.CommentView;
+import com.chzzk.common.auth.MemberRef;
 import com.chzzk.common.web.Paging;
 import java.time.Instant;
 import java.util.List;
@@ -20,7 +21,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 댓글 API. Listing and writing are per target ({@code /api/vods/{id}/comments}, {@code /api/broadcasts/{id}/comments});
- * editing and deleting address the 댓글 itself ({@code /api/comments/{id}}).
+ * editing and deleting address the 댓글 itself ({@code /api/comments/{id}}). Listing pages older 댓글 with
+ * {@code before} and newer ones with {@code after} (for polling).
  */
 @RestController
 class CommentController {
@@ -33,8 +35,9 @@ class CommentController {
 
     @GetMapping("/api/vods/{vodId}/comments")
     CommentPageResponse listOnVod(@PathVariable long vodId, @RequestParam(required = false) Long before,
+                                  @RequestParam(required = false) Long after,
                                   @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
-        return list(CommentTarget.vod(vodId), before, size);
+        return list(CommentTarget.vod(vodId), before, after, size);
     }
 
     @PostMapping("/api/vods/{vodId}/comments")
@@ -44,8 +47,9 @@ class CommentController {
 
     @GetMapping("/api/broadcasts/{broadcastId}/comments")
     CommentPageResponse listOnBroadcast(@PathVariable long broadcastId, @RequestParam(required = false) Long before,
+                                        @RequestParam(required = false) Long after,
                                         @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
-        return list(CommentTarget.broadcast(broadcastId), before, size);
+        return list(CommentTarget.broadcast(broadcastId), before, after, size);
     }
 
     @PostMapping("/api/broadcasts/{broadcastId}/comments")
@@ -65,9 +69,14 @@ class CommentController {
         return ResponseEntity.noContent().build();
     }
 
-    private CommentPageResponse list(CommentTarget target, Long before, int size) {
-        CommentPage page = comments.list(target, before, Paging.of(0, size).size());
-        return new CommentPageResponse(page.content().stream().map(CommentResponse::of).toList(), page.nextBefore());
+    /** With {@code after} (polling for newer 댓글), {@code before} is ignored. */
+    private CommentPageResponse list(CommentTarget target, Long before, Long after, int size) {
+        int pageSize = Paging.of(0, size).size();
+        CommentPage page = after != null
+                ? comments.listAfter(target, after, pageSize)
+                : comments.list(target, before, pageSize);
+        return new CommentPageResponse(page.content().stream().map(CommentResponse::of).toList(), page.nextBefore(),
+                page.nextAfter());
     }
 
     private ResponseEntity<CommentResponse> write(CommentTarget target, ContentRequest request) {
@@ -77,14 +86,11 @@ class CommentController {
 
     record ContentRequest(String content) {}
 
-    record CommentPageResponse(List<CommentResponse> content, Long nextBefore) {}
+    record CommentPageResponse(List<CommentResponse> content, Long nextBefore, Long nextAfter) {}
 
-    record Author(long id, String nickname) {}
-
-    record CommentResponse(long id, String content, Author author, Instant createdAt, boolean edited) {
+    record CommentResponse(long id, String content, MemberRef author, Instant createdAt, boolean edited) {
         static CommentResponse of(CommentView view) {
-            return new CommentResponse(view.id(), view.content(),
-                    new Author(view.author().id(), view.author().nickname()), view.createdAt(), view.edited());
+            return new CommentResponse(view.id(), view.content(), view.author(), view.createdAt(), view.edited());
         }
     }
 }

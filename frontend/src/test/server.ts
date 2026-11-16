@@ -18,8 +18,8 @@ const visitorMe = () =>
  */
 export const server = setupServer(
   http.get('/api/me', visitorMe),
-  http.get('/api/vods/:id/comments', () => HttpResponse.json({ content: [], nextBefore: null })),
-  http.get('/api/broadcasts/:id/comments', () => HttpResponse.json({ content: [], nextBefore: null })),
+  http.get('/api/vods/:id/comments', () => HttpResponse.json({ content: [], nextBefore: null, nextAfter: null })),
+  http.get('/api/broadcasts/:id/comments', () => HttpResponse.json({ content: [], nextBefore: null, nextAfter: null })),
   http.get('/api/auth/csrf', () => HttpResponse.json({ headerName: 'X-XSRF-TOKEN', token: CSRF_TOKEN })),
 )
 

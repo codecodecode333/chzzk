@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router'
 import { apiErrorMessage, apiFieldErrors } from '../api/client'
 import {
@@ -23,8 +23,8 @@ function contentError(text: string): string | null {
 }
 
 /**
- * Adds the 댓글 of a freshly read newest page that aren't shown yet, keeping newest first. Ids only grow, so the
- * newcomers sort above what is shown and older pages already loaded stay below.
+ * Adds freshly read newer 댓글 that aren't shown yet (e.g. not the 회원's own, already added on writing), keeping
+ * newest first. Ids only grow, so the newcomers sort above what is shown and older pages already loaded stay below.
  */
 function mergeNewer(shown: Comment[], newest: Comment[]): Comment[] {
   const shownIds = new Set(shown.map((c) => c.id))
@@ -40,8 +40,10 @@ function errorMessage(error: unknown): string {
  * The 댓글 section for one target (a VOD or a 방송): the list newest first with "더 보기", the write box for 회원
  * (or "로그인하고 댓글 달기" for visitors), and inline 수정 / 삭제 on the current 회원's own 댓글.
  *
- * With `refreshEveryMs` (a 방송 중 방송) it re-reads the newest page that often and adds the 댓글 it hasn't shown yet
- * on top, keeping older pages already loaded; without it nothing refreshes on its own.
+ * With `refreshEveryMs` (a 방송 중 방송) it reads, that often, every 댓글 newer than the newest it has read (page by page
+ * with the `after` cursor, so none is skipped however many arrive), and adds them on top, keeping older pages already
+ * loaded. A failed first load is retried on the next tick, and a tick is skipped while the previous read is still
+ * waiting. Only new 댓글 arrive this way; others' edits and deletions show on reload. Without it nothing refreshes.
  */
 export function CommentSection({ target, refreshEveryMs }: { target: CommentTarget; refreshEveryMs?: number }) {
   const { kind, id } = target
@@ -52,40 +54,60 @@ export function CommentSection({ target, refreshEveryMs }: { target: CommentTarg
   const [loaded, setLoaded] = useState<{ targetKey: string; comments: Comment[]; nextBefore: number | null }>()
   const [loadError, setLoadError] = useState<{ targetKey: string; message: string }>()
   const [loadingMore, setLoadingMore] = useState(false)
+  /** The newest 댓글 id read from the server for this target (0: none yet), once its first page has loaded. */
+  const newestRead = useRef<{ targetKey: string; id: number }>(undefined)
   const current = loaded?.targetKey === targetKey ? loaded : undefined
   const comments = current?.comments
   const nextBefore = current?.nextBefore ?? null
   const shownLoadError = loadError?.targetKey === targetKey ? loadError.message : null
 
   useEffect(() => {
+    const commentTarget = { kind, id } as CommentTarget
     let active = true
-    listComments({ kind, id } as CommentTarget).then(
-      (page) => {
-        if (active) setLoaded({ targetKey, comments: page.content, nextBefore: page.nextBefore })
-      },
-      (error: unknown) => {
-        if (active) setLoadError({ targetKey, message: apiErrorMessage(error) })
-      },
-    )
-    return () => {
-      active = false
-    }
-  }, [kind, id, targetKey])
+    let reading = false
 
-  useEffect(() => {
-    if (!refreshEveryMs) return
-    let active = true
-    const timer = setInterval(() => {
-      listComments({ kind, id } as CommentTarget).then(
-        (page) => {
-          if (!active) return
+    async function readFirstPage() {
+      const page = await listComments(commentTarget)
+      if (!active) return
+      newestRead.current = { targetKey, id: page.content[0]?.id ?? 0 }
+      setLoaded({ targetKey, comments: page.content, nextBefore: page.nextBefore })
+      setLoadError(undefined)
+    }
+
+    async function readNewer(after: number) {
+      for (;;) {
+        const page = await listComments(commentTarget, { after })
+        if (!active) return
+        if (page.content.length > 0) {
+          after = page.content[0].id
+          newestRead.current = { targetKey, id: after }
+          const newer = page.content
           setLoaded((prev) =>
-            prev && prev.targetKey === targetKey ? { ...prev, comments: mergeNewer(prev.comments, page.content) } : prev,
+            prev && prev.targetKey === targetKey ? { ...prev, comments: mergeNewer(prev.comments, newer) } : prev,
           )
-        },
-        () => {}, // a failed refresh keeps what is shown; the next tick tries again
-      )
-    }, refreshEveryMs)
+        }
+        if (page.nextAfter == null) return
+      }
+    }
+
+    async function read() {
+      if (reading) return // the previous read is still waiting
+      reading = true
+      const cursor = newestRead.current?.targetKey === targetKey ? newestRead.current.id : null
+      try {
+        if (cursor === null) await readFirstPage()
+        else await readNewer(cursor)
+      } catch (error) {
+        // A failed refresh keeps what is shown; a failed first load shows why. The next tick tries again.
+        if (active && cursor === null) setLoadError({ targetKey, message: apiErrorMessage(error) })
+      } finally {
+        reading = false
+      }
+    }
+
+    // The first page once per target; a change of `refreshEveryMs` alone keeps what is loaded.
+    if (newestRead.current?.targetKey !== targetKey) void read()
+    const timer = refreshEveryMs ? setInterval(() => void read(), refreshEveryMs) : undefined
     return () => {
       active = false
       clearInterval(timer)
@@ -105,7 +127,7 @@ export function CommentSection({ target, refreshEveryMs }: { target: CommentTarg
     if (nextBefore === null || loadingMore) return
     setLoadingMore(true)
     try {
-      const page = await listComments(target, nextBefore)
+      const page = await listComments(target, { before: nextBefore })
       // A 댓글 written meanwhile can't reappear here: older pages only hold ids below the cursor.
       update((shown) => [...shown, ...page.content], page.nextBefore)
       setLoadError(undefined)

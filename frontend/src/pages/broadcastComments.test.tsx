@@ -35,19 +35,39 @@ type ApiComment = ReturnType<typeof comment>
 
 /**
  * Serves 방송 7 (whatever `state.broadcast` is) and its 댓글 from `state.comments` (newest first), paging by
- * `before` like the server; counts the 댓글 list requests.
+ * `before` and `after` like the server; counts the 댓글 list requests. While `state.hold` is set, list requests wait
+ * for it; `state.failNext` makes the next list request fail.
  */
 function broadcastServer(broadcast: object, comments: ApiComment[], pageSize = 20) {
-  const state = { broadcast, comments, commentRequests: 0 }
+  const state = {
+    broadcast,
+    comments,
+    commentRequests: 0,
+    hold: null as Promise<void> | null,
+    failNext: false,
+  }
   server.use(
     http.get('/api/broadcasts/7', () => HttpResponse.json(state.broadcast)),
-    http.get('/api/broadcasts/7/comments', ({ request }) => {
+    http.get('/api/broadcasts/7/comments', async ({ request }) => {
       state.commentRequests++
-      const before = new URL(request.url).searchParams.get('before')
+      if (state.hold) await state.hold
+      if (state.failNext) {
+        state.failNext = false
+        return HttpResponse.json({ status: 500, detail: '잠시 후 다시 시도해 주세요.' }, { status: 500 })
+      }
+      const params = new URL(request.url).searchParams
+      const after = params.get('after')
+      if (after !== null) {
+        const newer = state.comments.filter((c) => c.id > Number(after)).reverse() // oldest first
+        const page = newer.slice(0, pageSize)
+        const nextAfter = newer.length > pageSize ? page[page.length - 1].id : null
+        return HttpResponse.json({ content: page.reverse(), nextBefore: null, nextAfter })
+      }
+      const before = params.get('before')
       const older = state.comments.filter((c) => before === null || c.id < Number(before))
       const page = older.slice(0, pageSize)
       const nextBefore = older.length > pageSize ? page[page.length - 1].id : null
-      return HttpResponse.json({ content: page, nextBefore })
+      return HttpResponse.json({ content: page, nextBefore, nextAfter: null })
     }),
   )
   return state
@@ -95,6 +115,71 @@ describe('방송 댓글 on the 시청 screen', () => {
     // a poll with nothing new changes nothing
     await act(() => vi.advanceTimersByTimeAsync(5000))
     expect(await shownComments()).toEqual(['다섯째', '넷째', '셋째', '둘째', '첫째'])
+  })
+
+  it('picks up every new 댓글 even when more than a page arrive between two refreshes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mocked.watch.mockResolvedValue({ stream: new MediaStream(), stop: vi.fn() })
+    const state = broadcastServer(live, [comment(2, '둘째'), comment(1, '첫째')], 2)
+
+    renderWatch()
+    const section = await screen.findByRole('region', { name: '댓글' })
+    await within(section).findByText('둘째')
+
+    state.comments = [
+      comment(7, '일곱째'),
+      comment(6, '여섯째'),
+      comment(5, '다섯째'),
+      comment(4, '넷째'),
+      comment(3, '셋째'),
+      ...state.comments,
+    ]
+    await act(() => vi.advanceTimersByTimeAsync(5000))
+
+    await within(section).findByText('셋째')
+    expect(await shownComments()).toEqual(['일곱째', '여섯째', '다섯째', '넷째', '셋째', '둘째', '첫째'])
+  })
+
+  it('retries a failed first load of 댓글 on the next refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mocked.watch.mockResolvedValue({ stream: new MediaStream(), stop: vi.fn() })
+    const state = broadcastServer(live, [comment(1, '첫째')])
+    state.failNext = true
+
+    renderWatch()
+    const section = await screen.findByRole('region', { name: '댓글' })
+    await within(section).findByRole('alert')
+    expect(within(section).queryByText('첫째')).not.toBeInTheDocument()
+
+    await act(() => vi.advanceTimersByTimeAsync(5000))
+
+    expect(await within(section).findByText('첫째')).toBeInTheDocument()
+    expect(within(section).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('does not start a refresh while the previous one is still waiting', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mocked.watch.mockResolvedValue({ stream: new MediaStream(), stop: vi.fn() })
+    const state = broadcastServer(live, [comment(1, '첫째')])
+
+    renderWatch()
+    await screen.findByText('첫째')
+    let release = () => {}
+    state.hold = new Promise((resolve) => {
+      release = resolve
+    })
+    const requestsBefore = state.commentRequests
+
+    await act(() => vi.advanceTimersByTimeAsync(20000))
+    expect(state.commentRequests).toBe(requestsBefore + 1)
+
+    state.comments = [comment(2, '둘째'), ...state.comments]
+    state.hold = null
+    release()
+    await act(() => vi.advanceTimersByTimeAsync(5000))
+
+    expect(await screen.findByText('둘째')).toBeInTheDocument()
+    expect(await shownComments()).toEqual(['둘째', '첫째'])
   })
 
   it('stops refreshing 댓글 once the 방송 ends', async () => {
