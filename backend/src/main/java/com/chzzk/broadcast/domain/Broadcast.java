@@ -1,7 +1,6 @@
 package com.chzzk.broadcast.domain;
 
 import com.chzzk.common.auth.MemberRef;
-import com.chzzk.member.domain.Member;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -33,7 +32,7 @@ public class Broadcast {
     /** The 소유자, who is also its 송출자. Loaded with the 방송 so its 닉네임 can always be shown. */
     @ManyToOne(optional = false)
     @JoinColumn(name = "owner_id", nullable = false, updatable = false)
-    private Member owner;
+    private BroadcastOwner owner;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -54,7 +53,7 @@ public class Broadcast {
 
     protected Broadcast() {}
 
-    Broadcast(Member owner, String title, String publishKeyHash, Instant startedAt) {
+    Broadcast(BroadcastOwner owner, String title, String publishKeyHash, Instant startedAt) {
         this.owner = owner;
         this.title = title;
         this.publishKeyHash = publishKeyHash;
@@ -64,7 +63,7 @@ public class Broadcast {
 
     public Long getId() { return id; }
     public String getTitle() { return title; }
-    public MemberRef getOwner() { return owner.toRef(); }
+    public BroadcastOwner getOwner() { return owner; }
     public BroadcastStatus getStatus() { return status; }
     public Instant getStartedAt() { return startedAt; }
     public Instant getEndedAt() { return endedAt; }
@@ -79,7 +78,7 @@ public class Broadcast {
     }
 
     boolean isOwnedBy(MemberRef member) {
-        return owner.getId() == member.id();
+        return owner.is(member);
     }
 
     String getPublishKeyHash() { return publishKeyHash; }

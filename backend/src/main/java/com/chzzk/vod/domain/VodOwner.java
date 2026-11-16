@@ -27,6 +27,11 @@ public class VodOwner {
     public long getId() { return id; }
     public String getNickname() { return nickname; }
 
+    /** As other features and API responses see a 회원. */
+    public MemberRef toRef() {
+        return new MemberRef(id, nickname);
+    }
+
     boolean is(MemberRef member) {
         return id == member.id();
     }

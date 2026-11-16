@@ -2,6 +2,7 @@ package com.chzzk.broadcast.web;
 
 import com.chzzk.broadcast.domain.Broadcast;
 import com.chzzk.broadcast.domain.BroadcastLifecycle;
+import com.chzzk.broadcast.domain.BroadcastNotFoundException;
 import com.chzzk.broadcast.domain.BroadcastStatus;
 import com.chzzk.broadcast.domain.PublishKey;
 import com.chzzk.broadcast.media.MediaPaths;
@@ -10,7 +11,6 @@ import com.chzzk.common.web.PageResponse;
 import com.chzzk.common.web.Paging;
 import java.net.URI;
 import java.time.Instant;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 /** The public 방송 API. */
 @RestController
@@ -42,7 +41,7 @@ class BroadcastController {
         Broadcast b = started.broadcast();
         return ResponseEntity.created(URI.create("/api/broadcasts/" + b.getId()))
                 .body(new StartedResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(),
-                        Owner.of(b), started.publishKey().value(), mediaUrl(b, "whip")));
+                        ownerOf(b), started.publishKey().value(), mediaUrl(b, "whip")));
     }
 
     @GetMapping
@@ -91,8 +90,8 @@ class BroadcastController {
         return new PublishKeyResponse(publishKey.value(), "/live/" + MediaPaths.of(id) + "/whip");
     }
 
-    private static ResponseStatusException notFound(long id) {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, id + "번 방송을 찾을 수 없습니다.");
+    private static BroadcastNotFoundException notFound(long id) {
+        return new BroadcastNotFoundException(id);
     }
 
     /**
@@ -103,35 +102,32 @@ class BroadcastController {
         return "/live/" + MediaPaths.of(b.getId()) + "/" + protocol;
     }
 
-    /** The 소유자 as every 방송 response shows it. */
-    record Owner(long id, String nickname) {
-        static Owner of(Broadcast b) {
-            MemberRef owner = b.getOwner();
-            return new Owner(owner.id(), owner.nickname());
-        }
+    /** The 소유자 as every 방송 response shows it: {@code {id, nickname}}. */
+    private static MemberRef ownerOf(Broadcast b) {
+        return b.getOwner().toRef();
     }
 
     /** With {@link PublishKeyResponse}, the only responses that carry a 송출 키. */
-    record StartedResponse(Long id, String title, BroadcastStatus status, Instant startedAt, Owner owner,
+    record StartedResponse(Long id, String title, BroadcastStatus status, Instant startedAt, MemberRef owner,
                            String publishKey, String whipUrl) {}
 
     record PublishKeyResponse(String publishKey, String whipUrl) {}
 
     /** A 방송 card in the 방송 목록; the player URL comes from the detail. */
     record BroadcastSummary(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt,
-                            Owner owner) {
+                            MemberRef owner) {
         static BroadcastSummary of(Broadcast b) {
             return new BroadcastSummary(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt(),
-                    Owner.of(b));
+                    ownerOf(b));
         }
     }
 
     /** {@code whepUrl} is {@code null} unless the 방송 is 방송 중. */
     record BroadcastResponse(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt,
-                             Owner owner, String whepUrl) {
+                             MemberRef owner, String whepUrl) {
         static BroadcastResponse of(Broadcast b) {
             return new BroadcastResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt(),
-                    Owner.of(b), b.isLive() ? mediaUrl(b, "whep") : null);
+                    ownerOf(b), b.isLive() ? mediaUrl(b, "whep") : null);
         }
     }
 }

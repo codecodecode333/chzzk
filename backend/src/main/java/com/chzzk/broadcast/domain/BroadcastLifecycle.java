@@ -5,9 +5,8 @@ import com.chzzk.common.auth.CurrentMember;
 import com.chzzk.common.auth.MemberRef;
 import com.chzzk.common.error.ConflictException;
 import com.chzzk.common.error.ForbiddenException;
+import com.chzzk.common.error.UnauthenticatedException;
 import com.chzzk.common.text.Title;
-import com.chzzk.member.domain.Member;
-import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -48,7 +47,7 @@ public class BroadcastLifecycle {
     private final MediaServerGateway mediaServer;
     private final TransactionTemplate transaction;
     private final CurrentMember currentMember;
-    private final EntityManager entityManager;
+    private final BroadcastOwnerRepository owners;
 
     static final String ALREADY_LIVE = "이미 방송 중인 방송이 있습니다. 진행 중인 방송을 이어서 송출해 주세요.";
     static final String NOT_OWNER = "내 방송만 제어할 수 있습니다.";
@@ -56,13 +55,13 @@ public class BroadcastLifecycle {
     static final String STILL_LIVE = "방송 중인 방송은 삭제할 수 없습니다. 방송을 먼저 종료하세요.";
 
     BroadcastLifecycle(BroadcastRepository repository, Clock clock, MediaServerGateway mediaServer,
-                       TransactionTemplate transaction, CurrentMember currentMember, EntityManager entityManager) {
+                       TransactionTemplate transaction, CurrentMember currentMember, BroadcastOwnerRepository owners) {
         this.repository = repository;
         this.clock = clock;
         this.mediaServer = mediaServer;
         this.transaction = transaction;
         this.currentMember = currentMember;
-        this.entityManager = entityManager;
+        this.owners = owners;
     }
 
     /** A just-started 방송 and its 송출 키, which is handed out only this once. */
@@ -82,7 +81,7 @@ public class BroadcastLifecycle {
                     throw alreadyLive(live.getId());
                 });
                 PublishKey publishKey = PublishKey.generate();
-                Member member = entityManager.find(Member.class, owner.id());
+                BroadcastOwner member = owners.findById(owner.id()).orElseThrow(UnauthenticatedException::new);
                 Broadcast broadcast = repository.saveAndFlush(
                         new Broadcast(member, normalized, publishKey.hash(), now()));
                 return new Started(broadcast, publishKey);
@@ -158,16 +157,15 @@ public class BroadcastLifecycle {
 
     /**
      * "제목 수정" by the 소유자 (401/403 otherwise), whether the 방송 is 방송 중 or 종료; the same title rule as
-     * {@link #start}.
+     * {@link #start}, checked only after login, existence and ownership (as for VOD).
      *
      * @return the renamed 방송, or empty for an unknown 방송
      */
     public Optional<Broadcast> rename(long id, String title) {
         MemberRef member = currentMember.require();
-        String normalized = Title.normalize(title, message -> new InvalidBroadcastException("title", message));
         return transaction.execute(tx -> repository.findById(id).map(b -> {
             requireOwner(b, member);
-            b.rename(normalized);
+            b.rename(Title.normalize(title, message -> new InvalidBroadcastException("title", message)));
             return b;
         }));
     }

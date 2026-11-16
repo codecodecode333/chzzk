@@ -1,10 +1,10 @@
 package com.chzzk.vod.web;
 
+import com.chzzk.common.auth.MemberRef;
 import com.chzzk.common.web.PageResponse;
 import com.chzzk.common.web.Paging;
 import com.chzzk.vod.domain.Vod;
 import com.chzzk.vod.domain.VodNotFoundException;
-import com.chzzk.vod.domain.VodOwner;
 import com.chzzk.vod.domain.VodService;
 import com.chzzk.vod.domain.VodService.VideoFileMetadata;
 import java.io.IOException;
@@ -101,24 +101,17 @@ class VodController {
 
     record UpdateVodRequest(String title, String description) {}
 
-    /** The VOD's 소유자 as clients see one. */
-    record OwnerResponse(long id, String nickname) {
-        static OwnerResponse of(VodOwner owner) {
-            return new OwnerResponse(owner.getId(), owner.getNickname());
-        }
-    }
-
     record VodResponse(Long id, String title, String description, Instant createdAt, String streamUrl,
-                       OwnerResponse owner) {
+                       MemberRef owner) {
         static VodResponse of(Vod vod) {
             return new VodResponse(vod.getId(), vod.getTitle(), vod.getDescription(), vod.getCreatedAt(),
-                    vodPath(vod) + "/stream", OwnerResponse.of(vod.getOwner()));
+                    vodPath(vod) + "/stream", vod.getOwner().toRef());
         }
     }
 
-    record VodSummary(Long id, String title, Instant createdAt, OwnerResponse owner) {
+    record VodSummary(Long id, String title, Instant createdAt, MemberRef owner) {
         static VodSummary of(Vod vod) {
-            return new VodSummary(vod.getId(), vod.getTitle(), vod.getCreatedAt(), OwnerResponse.of(vod.getOwner()));
+            return new VodSummary(vod.getId(), vod.getTitle(), vod.getCreatedAt(), vod.getOwner().toRef());
         }
     }
 }

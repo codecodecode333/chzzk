@@ -24,6 +24,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * VOD registration, query, edit and delete. Owns the registration rules, and saves the 영상 파일 first, then inserts
@@ -108,17 +110,25 @@ public class VodService {
     }
 
     /**
-     * The 소유자 deletes the VOD: the row goes first (its 댓글 with it, by cascade), then the 영상 파일 best-effort.
-     * A file that can't be removed is logged and left behind; the VOD is gone either way.
+     * The 소유자 deletes the VOD: the row goes in one transaction (its 댓글 with it, by cascade), and only once that has
+     * committed is the 영상 파일 removed, best-effort. A file that can't be removed is logged and left behind; the VOD
+     * is gone either way. If the delete rolls back, the file stays, so the VOD remains playable.
      */
+    @Transactional
     public void delete(long id) {
         Vod vod = ownedByCurrentMember(id);
         repository.delete(vod);
-        try {
-            storage.delete(vod.getStorageKey());
-        } catch (RuntimeException e) {
-            log.warn("Failed to delete the video file of deleted VOD {} ({})", id, vod.getStorageKey(), e);
-        }
+        String storageKey = vod.getStorageKey();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    storage.delete(storageKey);
+                } catch (RuntimeException e) {
+                    log.warn("Failed to delete the video file of deleted VOD {} ({})", id, storageKey, e);
+                }
+            }
+        });
     }
 
     private Vod ownedByCurrentMember(long id) {

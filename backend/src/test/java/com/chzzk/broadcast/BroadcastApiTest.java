@@ -709,6 +709,17 @@ class BroadcastApiTest {
     }
 
     @Test
+    void renameChecksLoginExistenceAndOwnershipBeforeTheTitle() {
+        long id = startedId("제목");
+        Map<String, String> invalid = Map.of("title", "");
+
+        assertProblem(ApiSession.visitor(http).patch("/api/broadcasts/" + id, invalid), HttpStatus.UNAUTHORIZED);
+        assertProblem(owners.get(id).patch("/api/broadcasts/999999", invalid), HttpStatus.NOT_FOUND);
+        assertProblem(ApiSession.member(http).patch("/api/broadcasts/" + id, invalid), HttpStatus.FORBIDDEN);
+        assertProblem(owners.get(id).patch("/api/broadcasts/" + id, invalid), HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void ownerDeletingAnEndedBroadcastRemovesItAndItsComments() {
         long id = startedId("지울 방송");
         endAt(id, Instant.parse("2026-11-15T13:00:00Z"));
