@@ -84,9 +84,9 @@ class VodApiTest {
 
     private ApiSession browser;
 
-    /** The browser the writes come from: a visitor with a CSRF token (VOD 등록 needs no login yet). */
+    /** The browser the writes come from: a logged-in 회원, who becomes the 소유자 of what it registers. */
     ApiSession browser() {
-        if (browser == null) browser = ApiSession.visitor(http);
+        if (browser == null) browser = ApiSession.member(http);
         return browser;
     }
 
@@ -123,6 +123,11 @@ class VodApiTest {
     }
 
     ResponseEntity<Map<String, Object>> register(String title, String description, String filename, byte[] bytes) {
+        return register(browser(), title, description, filename, bytes);
+    }
+
+    static ResponseEntity<Map<String, Object>> register(ApiSession as, String title, String description,
+                                                       String filename, byte[] bytes) {
         MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
         form.add("title", title);
         if (description != null) {
@@ -136,7 +141,7 @@ class VodApiTest {
         });
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-        return browser().exchange("/api/vods", HttpMethod.POST, new HttpEntity<>(form, headers),
+        return as.exchange("/api/vods", HttpMethod.POST, new HttpEntity<>(form, headers),
                 new ParameterizedTypeReference<>() {});
     }
 
@@ -164,7 +169,7 @@ class VodApiTest {
         List<Map<String, Object>> listed = listContent();
 
         Map<String, Object> first = listed.get(0);
-        assertThat(first).containsOnlyKeys("id", "title", "createdAt");
+        assertThat(first).containsOnlyKeys("id", "title", "createdAt", "owner");
         assertThat(first).containsEntry("id", id).containsEntry("title", "내 다시보기");
         assertThat(listed.get(1)).containsEntry("title", "older");
     }
@@ -180,7 +185,7 @@ class VodApiTest {
         ResponseEntity<Map<String, Object>> detail = getJson("/api/vods/" + id);
 
         assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(detail.getBody()).containsOnlyKeys("id", "title", "description", "createdAt", "streamUrl");
+        assertThat(detail.getBody()).containsOnlyKeys("id", "title", "description", "createdAt", "streamUrl", "owner");
         assertThat(detail.getBody())
                 .containsEntry("id", id)
                 .containsEntry("title", "상세")
@@ -536,5 +541,158 @@ class VodApiTest {
 
         assertProblem(response, HttpStatus.BAD_REQUEST);
         assertThat(invalidFields(response)).containsExactly("file");
+    }
+
+    // --- 소유자: register requires login, update and delete are the 소유자's alone ---
+
+    static Map<String, Object> ownerOf(ApiSession session) {
+        return Map.of("id", session.member().id(), "nickname", session.member().nickname());
+    }
+
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> ownerIn(Map<String, Object> vod) {
+        Map<String, Object> owner = (Map<String, Object>) vod.get("owner");
+        assertThat(owner).as("owner of %s", vod).containsOnlyKeys("id", "nickname");
+        return Map.of("id", ((Number) owner.get("id")).longValue(), "nickname", owner.get("nickname"));
+    }
+
+    @Test
+    void visitorCannotRegisterAVod() throws IOException {
+        long filesBefore = storedFileCount();
+
+        ResponseEntity<Map<String, Object>> response =
+                register(ApiSession.visitor(http), "익명", null, "clip.mp4", mp4Bytes());
+
+        assertProblem(response, HttpStatus.UNAUTHORIZED);
+        assertThat(storedFileCount()).isEqualTo(filesBefore);
+    }
+
+    @Test
+    void registeringMemberBecomesTheOwnerShownInResponseListAndDetail() {
+        ApiSession owner = ApiSession.member(http);
+
+        Map<String, Object> created = register(owner, "내 영상", null, "clip.mp4", mp4Bytes()).getBody();
+
+        assertThat(ownerIn(created)).isEqualTo(ownerOf(owner));
+        assertThat(ownerIn(getJson("/api/vods/" + created.get("id")).getBody())).isEqualTo(ownerOf(owner));
+        Map<String, Object> listed = listContent().stream()
+                .filter(vod -> created.get("id").equals(vod.get("id"))).findFirst().orElseThrow();
+        assertThat(ownerIn(listed)).isEqualTo(ownerOf(owner));
+    }
+
+    @Test
+    void ownerCanEditTitleAndDescription() {
+        ApiSession owner = ApiSession.member(http);
+        Object id = register(owner, "원래 제목", "원래 설명", "clip.mp4", mp4Bytes()).getBody().get("id");
+
+        ResponseEntity<Map<String, Object>> updated =
+                owner.patch("/api/vods/" + id, Map.of("title", "  새 제목  ", "description", "새 설명"));
+
+        assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updated.getBody()).containsEntry("id", id).containsEntry("title", "새 제목")
+                .containsEntry("description", "새 설명").containsEntry("streamUrl", "/api/vods/" + id + "/stream");
+        assertThat(ownerIn(updated.getBody())).isEqualTo(ownerOf(owner));
+        assertThat(getJson("/api/vods/" + id).getBody())
+                .containsEntry("title", "새 제목").containsEntry("description", "새 설명");
+    }
+
+    @Test
+    void editingOnlyTheTitleKeepsTheDescriptionAndABlankDescriptionClearsIt() {
+        ApiSession owner = ApiSession.member(http);
+        Object id = register(owner, "제목", "설명", "clip.mp4", mp4Bytes()).getBody().get("id");
+
+        assertThat(owner.patch("/api/vods/" + id, Map.of("title", "제목만")).getBody())
+                .containsEntry("title", "제목만").containsEntry("description", "설명");
+        assertThat(owner.patch("/api/vods/" + id, Map.of("description", "  ")).getBody())
+                .containsEntry("title", "제목만").containsEntry("description", null);
+    }
+
+    @Test
+    void editIsValidatedLikeRegistration() {
+        ApiSession owner = ApiSession.member(http);
+        Object id = register(owner, "제목", "설명", "clip.mp4", mp4Bytes()).getBody().get("id");
+
+        ResponseEntity<Map<String, Object>> blankTitle = owner.patch("/api/vods/" + id, Map.of("title", "  "));
+        ResponseEntity<Map<String, Object>> longTitle =
+                owner.patch("/api/vods/" + id, Map.of("title", "가".repeat(101)));
+        ResponseEntity<Map<String, Object>> longDescription =
+                owner.patch("/api/vods/" + id, Map.of("description", "a".repeat(2001)));
+
+        assertProblem(blankTitle, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(blankTitle)).containsExactly("title");
+        assertProblem(longTitle, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(longTitle)).containsExactly("title");
+        assertProblem(longDescription, HttpStatus.BAD_REQUEST);
+        assertThat(invalidFields(longDescription)).containsExactly("description");
+        assertThat(getJson("/api/vods/" + id).getBody())
+                .containsEntry("title", "제목").containsEntry("description", "설명");
+    }
+
+    @Test
+    void onlyTheOwnerMayEdit() {
+        ApiSession owner = ApiSession.member(http);
+        Object id = register(owner, "제목", null, "clip.mp4", mp4Bytes()).getBody().get("id");
+
+        assertProblem(ApiSession.visitor(http).patch("/api/vods/" + id, Map.of("title", "익명")),
+                HttpStatus.UNAUTHORIZED);
+        assertProblem(ApiSession.member(http).patch("/api/vods/" + id, Map.of("title", "남의 것")),
+                HttpStatus.FORBIDDEN);
+        assertProblem(owner.patch("/api/vods/999999", Map.of("title", "없음")), HttpStatus.NOT_FOUND);
+        assertThat(getJson("/api/vods/" + id).getBody()).containsEntry("title", "제목");
+    }
+
+    @Test
+    void ownerDeletingAVodRemovesItAndItsVideoFile() throws IOException {
+        ApiSession owner = ApiSession.member(http);
+        long filesBefore = storedFileCount();
+        Object id = register(owner, "지울 영상", null, "clip.mp4", mp4Bytes()).getBody().get("id");
+        assertThat(storedFileCount()).isEqualTo(filesBefore + 1);
+
+        ResponseEntity<Map<String, Object>> deleted = owner.delete("/api/vods/" + id);
+
+        assertThat(deleted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(getJson("/api/vods/" + id).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(stream(id, null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(listContent()).noneMatch(vod -> id.equals(vod.get("id")));
+        assertThat(storedFileCount()).isEqualTo(filesBefore);
+    }
+
+    @Test
+    void onlyTheOwnerMayDelete() throws IOException {
+        ApiSession owner = ApiSession.member(http);
+        Object id = register(owner, "남길 영상", null, "clip.mp4", mp4Bytes()).getBody().get("id");
+        long files = storedFileCount();
+
+        assertProblem(ApiSession.visitor(http).delete("/api/vods/" + id), HttpStatus.UNAUTHORIZED);
+        assertProblem(ApiSession.member(http).delete("/api/vods/" + id), HttpStatus.FORBIDDEN);
+        assertProblem(owner.delete("/api/vods/999999"), HttpStatus.NOT_FOUND);
+
+        assertThat(getJson("/api/vods/" + id).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(storedFileCount()).isEqualTo(files);
+    }
+
+    @Test
+    void deleteSucceedsAndLogsWhenTheVideoFileCannotBeRemoved(CapturedOutput output) throws IOException {
+        ApiSession owner = ApiSession.member(http);
+        Object id = register(owner, "파일 삭제 실패", null, "clip.mp4", mp4Bytes()).getBody().get("id");
+        Path stored;
+        try (Stream<Path> files = Files.walk(storageRoot)) {
+            stored = files.filter(Files::isRegularFile)
+                    .max(Comparator.comparing(VodApiTest::lastModified))
+                    .orElseThrow();
+        }
+        // A non-empty directory where the file was: the storage cannot delete it.
+        Files.delete(stored);
+        Files.createDirectories(stored.resolve("blocker"));
+        try {
+            ResponseEntity<Map<String, Object>> deleted = owner.delete("/api/vods/" + id);
+
+            assertThat(deleted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+            assertThat(getJson("/api/vods/" + id).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(output.getAll()).contains("Failed to delete the video file of deleted VOD " + id);
+        } finally {
+            Files.delete(stored.resolve("blocker"));
+            Files.delete(stored);
+        }
     }
 }

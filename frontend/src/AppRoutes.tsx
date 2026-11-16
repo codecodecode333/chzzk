@@ -54,7 +54,14 @@ export function AppRoutes() {
           <Routes>
             <Route path="/" element={<BroadcastListPage />} />
             <Route path="/vods" element={<VodListPage />} />
-            <Route path="/vods/new" element={<RegisterVodPage />} />
+            <Route
+              path="/vods/new"
+              element={
+                <RequireMember>
+                  <RegisterVodPage />
+                </RequireMember>
+              }
+            />
             <Route path="/vods/:id" element={<VodDetailPage />} />
             <Route
               path="/broadcasts/new"

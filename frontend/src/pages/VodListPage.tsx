@@ -64,6 +64,7 @@ export function VodListPage() {
                     <div aria-hidden="true" className="aspect-video bg-zinc-800" />
                     <div className="p-3">
                       <h2 className="truncate font-semibold">{vod.title}</h2>
+                      <p className="truncate text-sm text-zinc-300">{vod.owner.nickname}</p>
                       <time dateTime={vod.createdAt} className="text-sm text-zinc-400">
                         {formatDate(vod.createdAt)}
                       </time>
