@@ -4,6 +4,7 @@ import { apiErrorMessage } from '../api/client'
 import { getBroadcast, type Broadcast } from '../api/broadcasts'
 import { BroadcastInfo } from '../broadcasts/BroadcastInfo'
 import { CommentSection } from '../comments/CommentSection'
+import { DonateButton } from '../donations/DonateButton'
 import { watch } from '../media/media'
 import { LoadError } from './LoadError'
 
@@ -84,6 +85,7 @@ export function BroadcastWatchPage() {
         </div>
       )}
       <BroadcastInfo broadcast={broadcast} onUpdated={setBroadcast} />
+      <DonateButton broadcast={broadcast} />
       <CommentSection
         target={{ kind: 'broadcast', id: broadcast.id }}
         refreshEveryMs={live ? COMMENT_REFRESH_MS : undefined}

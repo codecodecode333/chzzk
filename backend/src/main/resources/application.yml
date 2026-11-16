@@ -58,3 +58,12 @@ broadcast:
     # Polls the media server for who is publishing, then auto-ends 방송 silent for over 60s (PublishingMonitor).
     enabled: true
     interval: 10s
+
+donation:
+  toss:
+    # Toss Payments TEST mode only (ADR-0004): every payment is simulated and no money moves. The defaults are the
+    # public 결제창 (API 개별 연동) keys from Toss's docs, shared by everyone; set your own test keys in .env.
+    # The client key goes to the browser; the secret key never leaves the server.
+    client-key: ${TOSS_CLIENT_KEY:test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq}
+    secret-key: ${TOSS_SECRET_KEY:test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R}
+    api-url: ${TOSS_API_URL:https://api.tosspayments.com}
