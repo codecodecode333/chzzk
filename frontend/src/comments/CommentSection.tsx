@@ -22,6 +22,16 @@ function contentError(text: string): string | null {
   return null
 }
 
+/**
+ * Adds the 댓글 of a freshly read newest page that aren't shown yet, keeping newest first. Ids only grow, so the
+ * newcomers sort above what is shown and older pages already loaded stay below.
+ */
+function mergeNewer(shown: Comment[], newest: Comment[]): Comment[] {
+  const shownIds = new Set(shown.map((c) => c.id))
+  const added = newest.filter((c) => !shownIds.has(c.id))
+  return added.length === 0 ? shown : [...added, ...shown].sort((a, b) => b.id - a.id)
+}
+
 function errorMessage(error: unknown): string {
   return apiFieldErrors(error).content ?? apiErrorMessage(error)
 }
@@ -29,8 +39,11 @@ function errorMessage(error: unknown): string {
 /**
  * The 댓글 section for one target (a VOD or a 방송): the list newest first with "더 보기", the write box for 회원
  * (or "로그인하고 댓글 달기" for visitors), and inline 수정 / 삭제 on the current 회원's own 댓글.
+ *
+ * With `refreshEveryMs` (a 방송 중 방송) it re-reads the newest page that often and adds the 댓글 it hasn't shown yet
+ * on top, keeping older pages already loaded; without it nothing refreshes on its own.
  */
-export function CommentSection({ target }: { target: CommentTarget }) {
+export function CommentSection({ target, refreshEveryMs }: { target: CommentTarget; refreshEveryMs?: number }) {
   const { kind, id } = target
   const { member, loading: memberLoading } = useCurrentMember()
   const location = useLocation()
@@ -58,6 +71,26 @@ export function CommentSection({ target }: { target: CommentTarget }) {
       active = false
     }
   }, [kind, id, targetKey])
+
+  useEffect(() => {
+    if (!refreshEveryMs) return
+    let active = true
+    const timer = setInterval(() => {
+      listComments({ kind, id } as CommentTarget).then(
+        (page) => {
+          if (!active) return
+          setLoaded((prev) =>
+            prev && prev.targetKey === targetKey ? { ...prev, comments: mergeNewer(prev.comments, page.content) } : prev,
+          )
+        },
+        () => {}, // a failed refresh keeps what is shown; the next tick tries again
+      )
+    }, refreshEveryMs)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [kind, id, targetKey, refreshEveryMs])
 
   /** Changes the shown 댓글 of this target (no-op before the first page arrives). */
   function update(change: (shown: Comment[]) => Comment[], cursor?: number | null) {

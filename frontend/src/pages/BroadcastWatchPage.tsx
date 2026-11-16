@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 import { apiErrorMessage } from '../api/client'
 import { getBroadcast, type Broadcast } from '../api/broadcasts'
 import { LiveBadge } from '../broadcasts/LiveBadge'
+import { CommentSection } from '../comments/CommentSection'
 import { formatDateTime } from '../format'
 import { useCurrentMember } from '../members/currentMemberContext'
 import { watch } from '../media/media'
@@ -10,6 +11,9 @@ import { LoadError } from './LoadError'
 
 /** How often the 시청 screen re-reads the 방송 status while it is 방송 중. */
 const STATUS_POLL_MS = 5000
+
+/** How often the 댓글 section picks up new 댓글 while the 방송 is 방송 중. */
+const COMMENT_REFRESH_MS = 5000
 
 /**
  * 시청 screen (`/broadcasts/:id`). While 방송 중 it polls the status every 5s, and right away when the WebRTC
@@ -98,6 +102,10 @@ export function BroadcastWatchPage() {
         <time dateTime={broadcast.startedAt}>시작 {formatDateTime(broadcast.startedAt)}</time>
         {broadcast.endedAt && <time dateTime={broadcast.endedAt}>종료 {formatDateTime(broadcast.endedAt)}</time>}
       </p>
+      <CommentSection
+        target={{ kind: 'broadcast', id: broadcast.id }}
+        refreshEveryMs={live ? COMMENT_REFRESH_MS : undefined}
+      />
     </article>
   )
 }

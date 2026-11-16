@@ -19,9 +19,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 댓글 API. Listing and writing are per target ({@code /api/vods/{id}/comments}); editing and deleting address the
- * 댓글 itself ({@code /api/comments/{id}}). A 방송 target is one more pair of list/write mappings using
- * {@link CommentTarget#broadcast}.
+ * 댓글 API. Listing and writing are per target ({@code /api/vods/{id}/comments}, {@code /api/broadcasts/{id}/comments});
+ * editing and deleting address the 댓글 itself ({@code /api/comments/{id}}).
  */
 @RestController
 class CommentController {
@@ -41,6 +40,18 @@ class CommentController {
     @PostMapping("/api/vods/{vodId}/comments")
     ResponseEntity<CommentResponse> writeOnVod(@PathVariable long vodId, @RequestBody ContentRequest request) {
         return write(CommentTarget.vod(vodId), request);
+    }
+
+    @GetMapping("/api/broadcasts/{broadcastId}/comments")
+    CommentPageResponse listOnBroadcast(@PathVariable long broadcastId, @RequestParam(required = false) Long before,
+                                        @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
+        return list(CommentTarget.broadcast(broadcastId), before, size);
+    }
+
+    @PostMapping("/api/broadcasts/{broadcastId}/comments")
+    ResponseEntity<CommentResponse> writeOnBroadcast(@PathVariable long broadcastId,
+                                                     @RequestBody ContentRequest request) {
+        return write(CommentTarget.broadcast(broadcastId), request);
     }
 
     @PatchMapping("/api/comments/{id}")
