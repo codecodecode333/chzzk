@@ -11,6 +11,7 @@ import org.springframework.security.web.authentication.logout.HttpStatusReturnin
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.servlet.HandlerExceptionResolver;
 
@@ -24,7 +25,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  *       {@link #securityContextRepository()} (the member module's login and signup do this). Features read it only
  *       through {@link CurrentMember}.</li>
  *   <li><b>CSRF:</b> {@code GET /api/auth/csrf} sets the readable {@code XSRF-TOKEN} cookie; every state-changing
- *       request must echo it as {@code X-XSRF-TOKEN}. The MediaMTX callback is exempt: it is no browser, and is
+ *       request must echo it as {@code X-XSRF-TOKEN}. Login and signup issue a fresh token. The MediaMTX callback is exempt: it is no browser, and is
  *       guarded by its shared secret (see {@code broadcast.web.MediaServerAuthController}).</li>
  *   <li><b>Access:</b> every URL is reachable here; login is enforced where the data is, by domain services calling
  *       {@link CurrentMember#require()} (401), and ownership/authorship the same way ({@code ForbiddenException},
@@ -39,9 +40,8 @@ class SecurityConfig {
     @Bean
     SecurityFilterChain apiSecurity(HttpSecurity http,
                                     @Qualifier("handlerExceptionResolver") HandlerExceptionResolver problems,
-                                    SecurityContextRepository securityContextRepository) throws Exception {
-        CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
-        csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
+                                    SecurityContextRepository securityContextRepository,
+                                    CsrfTokenRepository csrfTokens) throws Exception {
         http
                 .authorizeHttpRequests(access -> access
                         .requestMatchers(MEDIA_SERVER_CALLBACK).permitAll() // shared secret, checked in the controller
@@ -65,6 +65,17 @@ class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable);
         return http.build();
+    }
+
+    /**
+     * The readable {@code XSRF-TOKEN} cookie. {@link SessionLogin} replaces the token on login and signup (manual
+     * login skips Spring's own {@code CsrfAuthenticationStrategy}), so a token known before login is useless after.
+     */
+    @Bean
+    CsrfTokenRepository csrfTokenRepository() {
+        CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
+        return csrfTokens;
     }
 
     /** Where a login is kept: the HTTP session, which Spring Session stores in PostgreSQL. */

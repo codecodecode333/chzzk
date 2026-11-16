@@ -43,21 +43,25 @@ public final class ApiSession {
     private final TestRestTemplate http;
     private final Map<String, String> cookies;
     private final boolean sendsCsrfToken;
+    /** Sent as the CSRF header instead of the cookie's token, when set. */
+    private final String csrfHeaderOverride;
     private Member member;
 
     /** Who this session signed up as: its id and 닉네임 as {@code /api/me} reports them, and its credentials. */
     public record Member(long id, String nickname, String email, String password) {}
 
-    private ApiSession(TestRestTemplate http, Map<String, String> cookies, boolean sendsCsrfToken, Member member) {
+    private ApiSession(TestRestTemplate http, Map<String, String> cookies, boolean sendsCsrfToken,
+                       String csrfHeaderOverride, Member member) {
         this.http = http;
         this.cookies = cookies;
         this.sendsCsrfToken = sendsCsrfToken;
+        this.csrfHeaderOverride = csrfHeaderOverride;
         this.member = member;
     }
 
     /** A logged-out browser that has fetched its CSRF token ({@code GET /api/auth/csrf}). */
     public static ApiSession visitor(TestRestTemplate http) {
-        ApiSession session = new ApiSession(http, new LinkedHashMap<>(), true, null);
+        ApiSession session = new ApiSession(http, new LinkedHashMap<>(), true, null, null);
         assertThat(session.get("/api/auth/csrf").getStatusCode().is2xxSuccessful()).isTrue();
         return session;
     }
@@ -101,12 +105,22 @@ public final class ApiSession {
 
     /** Another browser holding a copy of this one's cookies right now (e.g. a stolen or stale session cookie). */
     public ApiSession copy() {
-        return new ApiSession(http, new LinkedHashMap<>(cookies), sendsCsrfToken, member);
+        return new ApiSession(http, new LinkedHashMap<>(cookies), sendsCsrfToken, csrfHeaderOverride, member);
     }
 
     /** This browser's cookies, but its writes carry no CSRF header (as a cross-site form post would). */
     public ApiSession withoutCsrfToken() {
-        return new ApiSession(http, cookies, false, member);
+        return new ApiSession(http, cookies, false, null, member);
+    }
+
+    /** This browser's cookies, but its writes echo {@code token} as the CSRF header (e.g. a token from before login). */
+    public ApiSession withCsrfHeader(String token) {
+        return new ApiSession(http, cookies, true, token, member);
+    }
+
+    /** The CSRF token this browser holds right now (its {@code XSRF-TOKEN} cookie). */
+    public String csrfToken() {
+        return cookies.get(CSRF_COOKIE);
     }
 
     public ResponseEntity<Map<String, Object>> get(String path) {
@@ -150,7 +164,7 @@ public final class ApiSession {
             headers.add(HttpHeaders.COOKIE, String.join("; ",
                     cookies.entrySet().stream().map(c -> c.getKey() + "=" + c.getValue()).toList()));
         }
-        String csrf = cookies.get(CSRF_COOKIE);
+        String csrf = csrfHeaderOverride != null ? csrfHeaderOverride : cookies.get(CSRF_COOKIE);
         if (sendsCsrfToken && csrf != null) headers.add(CSRF_HEADER, csrf);
         return headers;
     }

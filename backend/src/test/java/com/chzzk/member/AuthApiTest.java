@@ -162,6 +162,37 @@ class AuthApiTest {
     }
 
     @Test
+    void signupAndLoginIssueAFreshCsrfTokenAndThePreLoginOneStopsWorking() {
+        ApiSession browser = ApiSession.visitor(http);
+        String beforeSignup = browser.csrfToken();
+
+        assertThat(browser.post("/api/auth/signup", Map.of("email", "rotate@example.com", "password", "password1234",
+                "nickname", "회전회원")).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        String afterSignup = browser.csrfToken();
+        assertThat(afterSignup).isNotBlank().isNotEqualTo(beforeSignup);
+        assertProblem(browser.withCsrfHeader(beforeSignup).post("/api/broadcasts", Map.of("title", "옛 토큰")),
+                HttpStatus.FORBIDDEN);
+
+        ApiSession other = ApiSession.visitor(http);
+        String beforeLogin = other.csrfToken();
+        other.logIn("rotate@example.com", "password1234");
+
+        assertThat(other.csrfToken()).isNotBlank().isNotEqualTo(beforeLogin);
+        assertProblem(other.withCsrfHeader(beforeLogin).post("/api/auth/logout", null), HttpStatus.FORBIDDEN);
+        assertThat(other.post("/api/auth/logout", null).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    void meAndSignupAreJustIdAndNickname() {
+        ApiSession member = ApiSession.member(http);
+
+        assertThat(member.get("/api/me").getBody()).containsOnlyKeys("id", "nickname");
+        assertThat(ApiSession.visitor(http).post("/api/auth/signup", Map.of("email", "shape@example.com",
+                "password", "password1234", "nickname", "모양회원")).getBody()).containsOnlyKeys("id", "nickname");
+    }
+
+    @Test
     void theLoginHelperActsAsTheMemberItSignedUp() {
         ApiSession member = ApiSession.member(http);
         ApiSession sameMemberElsewhere = ApiSession.visitor(http)
