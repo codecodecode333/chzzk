@@ -1,6 +1,6 @@
 # 회원 인증·인가와 댓글
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

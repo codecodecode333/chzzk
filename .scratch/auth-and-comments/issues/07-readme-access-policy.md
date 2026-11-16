@@ -15,10 +15,10 @@ The real-phone checklist gains a step: a second phone logged in as a different �
 
 **Blocked by:** 02 (VOD 소유자), 04 (방송 제목 수정과 삭제), 06 (방송 댓글)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The README has a 공개 범위 section with the access-policy table above, matching the actual server behaviour (verify against the tests and controllers, not the spec alone)
-- [ ] The README states that viewing, lists and 댓글 lists are public with no login, and why
-- [ ] The README documents the data reset from the migrations and the 영상 파일 cleanup steps
-- [ ] The real-phone checklist includes the second-회원 check
-- [ ] The README run and test instructions are still accurate (run the tests once to confirm)
+- [x] The README has a 공개 범위 section with the access-policy table above, matching the actual server behaviour (verify against the tests and controllers, not the spec alone)
+- [x] The README states that viewing, lists and 댓글 lists are public with no login, and why
+- [x] The README documents the data reset from the migrations and the 영상 파일 cleanup steps
+- [x] The real-phone checklist includes the second-회원 check
+- [x] The README run and test instructions are still accurate (run the tests once to confirm)

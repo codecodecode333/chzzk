@@ -6,14 +6,14 @@ The 소유자 can edit the title and description inline on the detail page, with
 
 **Blocked by:** 01 (회원가입·로그인·로그아웃)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A migration deletes existing `vod` rows (pre-auth dev data) and adds `owner_id NOT NULL REFERENCES member`
-- [ ] `POST /api/vods` requires login (`401` otherwise) and records the caller as 소유자; list and detail include `owner: {id, nickname}`
-- [ ] `PATCH /api/vods/{id}` `{title?, description?}`: the 소유자 gets `200` with the updated VOD. Validation is the same as registration (`400`). Anonymous → `401`, another 회원 → `403`, unknown id → `404`
-- [ ] `DELETE /api/vods/{id}`: the 소유자 gets `204`, the row is removed, and then the 영상 파일 is deleted best-effort (a failure is logged and the delete still succeeds). Anonymous → `401`, another 회원 → `403`, unknown id → `404`
-- [ ] Ownership checks live in the VOD domain service, using the current-회원 accessor
-- [ ] The VOD registration screen redirects to login (with `next`) when logged out
-- [ ] VOD cards and the detail page show the 소유자 닉네임. 수정 (inline form) and 삭제 (with confirmation, then navigate to `/vods`) appear only for the 소유자, and a server `403` is shown as a message
-- [ ] HTTP API seam tests cover the authorization matrix (anonymous, other 회원, 소유자) for register, update and delete; the 영상 파일 being gone after delete; and `owner` in the responses. Existing VOD tests log in through the helper
-- [ ] Frontend seam tests cover: the registration guard redirect, controls visible only to the 소유자, the edit flow, and delete with confirmation
+- [x] A migration deletes existing `vod` rows (pre-auth dev data) and adds `owner_id NOT NULL REFERENCES member`
+- [x] `POST /api/vods` requires login (`401` otherwise) and records the caller as 소유자; list and detail include `owner: {id, nickname}`
+- [x] `PATCH /api/vods/{id}` `{title?, description?}`: the 소유자 gets `200` with the updated VOD. Validation is the same as registration (`400`). Anonymous → `401`, another 회원 → `403`, unknown id → `404`
+- [x] `DELETE /api/vods/{id}`: the 소유자 gets `204`, the row is removed, and then the 영상 파일 is deleted best-effort (a failure is logged and the delete still succeeds). Anonymous → `401`, another 회원 → `403`, unknown id → `404`
+- [x] Ownership checks live in the VOD domain service, using the current-회원 accessor
+- [x] The VOD registration screen redirects to login (with `next`) when logged out
+- [x] VOD cards and the detail page show the 소유자 닉네임. 수정 (inline form) and 삭제 (with confirmation, then navigate to `/vods`) appear only for the 소유자, and a server `403` is shown as a message
+- [x] HTTP API seam tests cover the authorization matrix (anonymous, other 회원, 소유자) for register, update and delete; the 영상 파일 being gone after delete; and `owner` in the responses. Existing VOD tests log in through the helper
+- [x] Frontend seam tests cover: the registration guard redirect, controls visible only to the 소유자, the edit flow, and delete with confirmation
