@@ -107,6 +107,9 @@ also need the CSRF token (`403` without it); the frontend's HTTP client sends it
 | Who am I (`GET /api/me`) | 회원 | `401` |
 | VOD 목록·상세·재생, 방송 목록·상세 | anyone | — |
 | VOD 등록, 방송 시작·종료 | anyone for now (ownership arrives with the next tickets) | — |
+| 댓글 목록 (`GET /api/vods/{id}/comments`) | anyone | `404` for an unknown VOD |
+| 댓글 쓰기 (`POST /api/vods/{id}/comments`) | 회원 | `401` |
+| 댓글 수정·삭제 (`PATCH`/`DELETE /api/comments/{id}`) | the 작성자 | `401` visitor, `403` another 회원 |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
 
 ## Tests
@@ -149,6 +152,12 @@ Conventions:
 - Every API error is RFC 7807 Problem Details (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation, built with `common.web.Problems.fieldError`). `common.web.ApiProblemHandler` covers Spring's own exceptions and the 500 catch-all; each feature maps its domain exceptions in its own `@RestControllerAdvice` ordered `ApiProblemHandler.FEATURE_ORDER` (e.g. `vod.web.VodProblemHandler`). Throw `ResponseStatusException` or a mapped domain exception; don't hand-roll error bodies.
   The one exception is MediaMTX's auth callback (`broadcast.web.MediaServerAuthController`): MediaMTX's contract wants
   an empty 2xx to allow and any other status to deny, so it answers a bare `204`/`401` with no body.
+- 댓글 (`com.chzzk.comment`) attach to a `CommentTarget` (`vod(id)` or `broadcast(id)`): `CommentService.list/write/edit/delete`
+  checks login and authorship itself; the `comment` table has `vod_id`/`broadcast_id` (exactly one set, both
+  `ON DELETE CASCADE`). It reads target existence and the 작성자's 닉네임 straight from the shared tables, so it
+  depends on no other feature module. Paging is a cursor: `?before=<nextBefore>&size=` (newest first, by id). On the
+  frontend, `<CommentSection target={{ kind: 'vod' | 'broadcast', id }} />` (`src/comments/`) is the one 댓글 UI, over
+  `src/api/comments.ts`.
 - Registration form rules live in `frontend/src/vods/validateVodForm.ts` (pure, mirrors the server), separate from how the form submits.
 - All frontend data access lives in `frontend/src/api/` (`vods.ts`, `broadcasts.ts`, `auth.ts`, shared `client.ts`); extend it rather than calling the network from pages.
 - Only `frontend/src/media/media.ts` touches the camera, `RTCPeerConnection` and WHIP/WHEP; pages call it and page tests `vi.mock` it (`src/pages/broadcastPages.test.tsx`).

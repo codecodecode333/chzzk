@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 import { apiErrorMessage, getVod, type Vod } from '../api/vods'
 import { LoadError } from './LoadError'
 import { formatDate } from '../format'
+import { CommentSection } from '../comments/CommentSection'
 
 export function VodDetailPage() {
   const { id = '' } = useParams()
@@ -67,6 +68,7 @@ export function VodDetailPage() {
         {formatDate(vod.createdAt)}
       </time>
       {vod.description && <p className="mt-4 whitespace-pre-wrap text-zinc-300">{vod.description}</p>}
+      <CommentSection target={{ kind: 'vod', id: vod.id }} />
     </article>
   )
 }
