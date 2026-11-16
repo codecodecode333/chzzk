@@ -71,7 +71,7 @@ describe('header', () => {
   })
 
   it('logs out with the CSRF token and switches back to the visitor header', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     const session = loggedInAs({ id: 1, nickname: '치지직회원' })
     let csrfHeader: string | null = null
     server.use(
@@ -96,7 +96,7 @@ describe('header', () => {
 
 describe('회원가입 page', () => {
   it('shows each field rule once the field is edited and blocks submit until all pass', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderAt('/signup')
 
     const submit = await screen.findByRole('button', { name: '가입하기' })
@@ -126,7 +126,7 @@ describe('회원가입 page', () => {
   })
 
   it('shows a taken email or 닉네임 under its field', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     server.use(
       http.post('/api/auth/signup', () =>
         problem(409, '이미 사용 중인 닉네임입니다.', [{ field: 'nickname', message: '이미 사용 중인 닉네임입니다.' }]),
@@ -149,7 +149,7 @@ describe('회원가입 page', () => {
   })
 
   it('signs up with the CSRF token, logs in, and goes to next', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     const session = loggedInAs(null)
     let sent: unknown
     let csrfHeader: string | null = null
@@ -182,7 +182,7 @@ describe('회원가입 page', () => {
 
 describe('로그인 page', () => {
   it('asks for both fields before submitting', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderAt('/login')
 
     const submit = await screen.findByRole('button', { name: '로그인' })
@@ -196,7 +196,7 @@ describe('로그인 page', () => {
   })
 
   it('shows the single bad-credentials message from the server and keeps the input', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     server.use(http.post('/api/auth/login', () => problem(401, '이메일 또는 비밀번호가 올바르지 않습니다.')))
     renderAt('/login')
 
@@ -210,7 +210,7 @@ describe('로그인 page', () => {
   })
 
   it('logs in and returns to next', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     const session = loggedInAs(null)
     let sent: unknown
     server.use(
@@ -239,7 +239,7 @@ describe('로그인 page', () => {
   it.each(['https://evil.example/', '//evil.example/x', '/\\evil.example', 'vods'])(
     'goes home instead of to a next outside the app (%s)',
     async (next) => {
-      const user = userEvent.setup()
+      const user = userEvent.setup({ delay: null })
       const session = loggedInAs(null)
       server.use(
         http.get('/api/broadcasts', () =>

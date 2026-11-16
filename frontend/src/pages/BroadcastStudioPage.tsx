@@ -54,8 +54,6 @@ interface Resumable {
   startedAt: string
 }
 
-const STUDIO_PATH = '/broadcasts/new'
-
 const PUBLISH_FAILED = '송출을 시작하지 못했습니다.'
 
 function publishErrorMessage(error: unknown): string {
@@ -468,7 +466,8 @@ export function BroadcastStudioPage() {
             <p role="alert" className="text-sm text-amber-200">
               로그인이 만료되었습니다. 방송은 계속 송출 중입니다.{' '}
               <a
-                href={withNext('/login', STUDIO_PATH)}
+                // Back to the 시청 page, not here: a second 송출 screen would offer "이어서 송출" and take over.
+                href={withNext('/login', `/broadcasts/${live.id}`)}
                 target="_blank"
                 rel="noopener"
                 className="font-semibold text-emerald-400 hover:underline"

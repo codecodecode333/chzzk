@@ -314,7 +314,8 @@ describe('송출 screen', () => {
     await user.click(await screen.findByRole('button', { name: '방송 종료' }))
 
     const relogin = await screen.findByRole('link', { name: '다시 로그인' })
-    expect(relogin).toHaveAttribute('href', '/login?next=%2Fbroadcasts%2Fnew')
+    // back to the 시청 page, not the 송출 screen, whose "이어서 송출" would take over from this tab
+    expect(relogin).toHaveAttribute('href', '/login?next=%2Fbroadcasts%2F7')
     expect(relogin).toHaveAttribute('target', '_blank')
     expect(screen.getByText('방송 중')).toBeInTheDocument()
     expect(stopPublishing).not.toHaveBeenCalled()
@@ -657,7 +658,7 @@ describe('송출 screen with a 방송 already 방송 중', () => {
 
 describe('시청 screen', () => {
   it('connects to a 방송 중 방송, plays it muted and offers 소리 켜기', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     mocked.watch.mockResolvedValue({ stream: fakeStream, stop: vi.fn() })
     server.use(
       http.get('/api/broadcasts/7', () =>

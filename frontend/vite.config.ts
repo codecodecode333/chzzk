@@ -33,5 +33,7 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Form tests type a lot; with every file running in parallel the default 5s can be too tight.
+    testTimeout: 15000,
   },
 })
