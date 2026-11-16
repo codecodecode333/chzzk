@@ -123,3 +123,20 @@ export async function listBroadcasts(
   const { data } = await client.get<Page<BroadcastSummary>>('/broadcasts', { params: { status, page, size } })
   return data
 }
+
+/**
+ * "제목 수정" by the 소유자, 방송 중 or 종료; resolves to the renamed 방송. Rejects with a Problem Details error
+ * (400 invalid title, 401, 403 not the 소유자, 404); show it with `apiErrorMessage`.
+ */
+export async function renameBroadcast(id: number, title: string): Promise<Broadcast> {
+  const { data } = await client.patch<Broadcast>(`/broadcasts/${id}`, { title })
+  return data
+}
+
+/**
+ * "삭제" of a 종료 방송 by the 소유자, with its 댓글. Rejects with a Problem Details error (409 while 방송 중, 401,
+ * 403 not the 소유자, 404); show it with `apiErrorMessage`.
+ */
+export async function deleteBroadcast(id: number): Promise<void> {
+  await client.delete(`/broadcasts/${id}`)
+}

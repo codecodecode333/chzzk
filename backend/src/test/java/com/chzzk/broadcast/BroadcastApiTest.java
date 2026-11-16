@@ -660,4 +660,91 @@ class BroadcastApiTest {
             assertThat(count.intValue()).isEqualTo(1);
         }
     }
+
+    // --- 제목 수정과 삭제: the 소유자's alone ---
+
+    @Test
+    void ownerRenamesALiveOrEndedBroadcast() {
+        long live = startedId("원래 제목");
+        long ended = startedId("끝난 방송");
+        endAt(ended, Instant.parse("2026-11-15T12:00:00Z"));
+
+        for (long id : List.of(live, ended)) {
+            ResponseEntity<Map<String, Object>> renamed = owners.get(id).patch("/api/broadcasts/" + id,
+                    Map.of("title", "  바뀐 제목  "));
+
+            assertThat(renamed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(renamed.getBody()).containsEntry("id", (int) id).containsEntry("title", "바뀐 제목");
+            assertThat(detail(id).getBody()).containsEntry("title", "바뀐 제목");
+        }
+        assertThat(detail(live).getBody()).containsEntry("status", "LIVE");
+        assertThat(detail(ended).getBody()).containsEntry("status", "ENDED")
+                .containsEntry("endedAt", "2026-11-15T12:00:00Z");
+    }
+
+    @Test
+    void renameFollowsTheStartTitleRule() {
+        long id = startedId("제목");
+
+        for (String title : List.of("", "  	 ", "가".repeat(101))) {
+            ResponseEntity<Map<String, Object>> response = owners.get(id).patch("/api/broadcasts/" + id,
+                    Map.of("title", title));
+
+            assertProblem(response, HttpStatus.BAD_REQUEST);
+            assertThat(response.getBody().get("errors").toString()).as(title).contains("field=title");
+        }
+        assertThat(detail(id).getBody()).containsEntry("title", "제목");
+    }
+
+    @Test
+    void onlyTheOwnerMayRename() {
+        long id = startedId("제목");
+
+        assertProblem(ApiSession.visitor(http).patch("/api/broadcasts/" + id, Map.of("title", "익명")),
+                HttpStatus.UNAUTHORIZED);
+        assertProblem(ApiSession.member(http).patch("/api/broadcasts/" + id, Map.of("title", "남의 것")),
+                HttpStatus.FORBIDDEN);
+        assertProblem(owners.get(id).patch("/api/broadcasts/999999", Map.of("title", "없음")), HttpStatus.NOT_FOUND);
+        assertThat(detail(id).getBody()).containsEntry("title", "제목");
+    }
+
+    @Test
+    void ownerDeletingAnEndedBroadcastRemovesItAndItsComments() {
+        long id = startedId("지울 방송");
+        endAt(id, Instant.parse("2026-11-15T13:00:00Z"));
+        ApiSession owner = owners.get(id);
+        jdbc.update("insert into comment (broadcast_id, author_id, content, created_at) values (?, ?, ?, now())",
+                id, owner.member().id(), "곧 사라질 댓글");
+
+        ResponseEntity<Map<String, Object>> deleted = owner.delete("/api/broadcasts/" + id);
+
+        assertThat(deleted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(detail(id).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(http.exchange("/api/broadcasts?status=ENDED&size=100", HttpMethod.GET, null, JSON).getBody()
+                .get("content")).asList().noneMatch(b -> ((Map<?, ?>) b).get("id").equals((int) id));
+        Number comments = jdbc.queryForObject("select count(*) from comment where broadcast_id = ?", Number.class, id);
+        assertThat(comments.intValue()).isZero();
+    }
+
+    @Test
+    void deletingALiveBroadcastIsRefusedUntilItEnds() {
+        long id = startedId("방송 중");
+
+        ResponseEntity<Map<String, Object>> refused = owners.get(id).delete("/api/broadcasts/" + id);
+
+        assertProblem(refused, HttpStatus.CONFLICT);
+        assertThat((String) refused.getBody().get("detail")).contains("방송을 먼저 종료");
+        assertThat(detail(id).getBody()).containsEntry("status", "LIVE");
+    }
+
+    @Test
+    void onlyTheOwnerMayDelete() {
+        long id = startedId("남의 방송");
+        endAt(id, Instant.parse("2026-11-15T14:00:00Z"));
+
+        assertProblem(ApiSession.visitor(http).delete("/api/broadcasts/" + id), HttpStatus.UNAUTHORIZED);
+        assertProblem(ApiSession.member(http).delete("/api/broadcasts/" + id), HttpStatus.FORBIDDEN);
+        assertProblem(owners.get(id).delete("/api/broadcasts/999999"), HttpStatus.NOT_FOUND);
+        assertThat(detail(id).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
 }

@@ -14,7 +14,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -32,9 +31,6 @@ class BroadcastCommentApiTest {
 
     @Autowired
     TestRestTemplate http;
-
-    @Autowired
-    JdbcTemplate jdbc;
 
     /** Starts a 방송 as a fresh 회원 (one 방송 중 방송 per 회원) and returns its 소유자's session and id. */
     record Started(ApiSession owner, long id) {}
@@ -193,14 +189,14 @@ class BroadcastCommentApiTest {
         assertThat(content(ApiSession.visitor(http).get(commentsOf(id)))).isEmpty();
     }
 
-    /** Ticket 04's delete API isn't here yet, so this covers the cascade at the DB level. */
     @Test
     void deletingABroadcastRemovesItsComments() {
-        long id = ended().id();
+        Started b = ended();
+        long id = b.id();
         ApiSession author = ApiSession.member(http);
         Object commentId = author.post(commentsOf(id), Map.of("content", "사라질 댓글")).getBody().get("id");
 
-        jdbc.update("DELETE FROM broadcast WHERE id = ?", id);
+        assertThat(b.owner().delete("/api/broadcasts/" + id).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
 
         assertThat(ApiSession.visitor(http).get(commentsOf(id)).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         // the 댓글 itself is gone, not merely unlisted
