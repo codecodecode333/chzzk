@@ -16,7 +16,8 @@ import java.time.Instant;
 
 /**
  * One 방송. Its state changes only through {@link BroadcastLifecycle}, which makes every status transition with a
- * conditional update in the database (so concurrent ones can't overwrite each other); this class exposes reads.
+ * conditional update in the database (so concurrent ones can't overwrite each other); this class exposes reads
+ * and the title change.
  */
 @Entity
 @Table(name = "broadcast")
@@ -71,6 +72,10 @@ public class Broadcast {
 
     public boolean isLive() {
         return status == BroadcastStatus.LIVE;
+    }
+
+    void rename(String title) {
+        this.title = title;
     }
 
     boolean isOwnedBy(MemberRef member) {

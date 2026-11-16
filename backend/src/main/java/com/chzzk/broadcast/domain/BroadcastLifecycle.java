@@ -29,7 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * The broadcast lifecycle: the single owner of 방송 status rules, the 송출 키 and who may publish or read.
  *
  * <p>Who may control a 방송 is decided here too: only a logged-in 회원 starts one and becomes its 소유자 (and 송출자),
- * and only the 소유자, by their login session ({@link CurrentMember}), ends it or gets a fresh 송출 키. The 송출 키
+ * and only the 소유자, by their login session ({@link CurrentMember}), ends it, gets a fresh 송출 키, renames it or deletes it once ended. The 송출 키
  * itself only authenticates the media connection (the MediaMTX auth callback, {@link #authorizePublish}).
  *
  * <p>State lives only in the database, so it survives restarts. Time comes from the injected {@link Clock}.
@@ -53,6 +53,7 @@ public class BroadcastLifecycle {
     static final String ALREADY_LIVE = "이미 방송 중인 방송이 있습니다. 진행 중인 방송을 이어서 송출해 주세요.";
     static final String NOT_OWNER = "내 방송만 제어할 수 있습니다.";
     static final String NOT_LIVE = "이미 종료된 방송입니다.";
+    static final String STILL_LIVE = "방송 중인 방송은 삭제할 수 없습니다. 방송을 먼저 종료하세요.";
 
     BroadcastLifecycle(BroadcastRepository repository, Clock clock, MediaServerGateway mediaServer,
                        TransactionTemplate transaction, CurrentMember currentMember, EntityManager entityManager) {
@@ -153,6 +154,38 @@ public class BroadcastLifecycle {
         }));
         if (issued.isPresent()) kickPublisher(id);
         return issued;
+    }
+
+    /**
+     * "제목 수정" by the 소유자 (401/403 otherwise), whether the 방송 is 방송 중 or 종료; the same title rule as
+     * {@link #start}.
+     *
+     * @return the renamed 방송, or empty for an unknown 방송
+     */
+    public Optional<Broadcast> rename(long id, String title) {
+        MemberRef member = currentMember.require();
+        String normalized = Title.normalize(title, message -> new InvalidBroadcastException("title", message));
+        return transaction.execute(tx -> repository.findById(id).map(b -> {
+            requireOwner(b, member);
+            b.rename(normalized);
+            return b;
+        }));
+    }
+
+    /**
+     * "삭제" by the 소유자 (401/403 otherwise) of a 종료 방송, with its 댓글 (by cascade). A 방송 중 방송 is refused
+     * with a {@link ConflictException} until it ends; 종료 is final, so the check can't go stale before the delete.
+     *
+     * @return {@code false} for an unknown 방송
+     */
+    public boolean delete(long id) {
+        MemberRef member = currentMember.require();
+        return transaction.execute(tx -> repository.findById(id).map(b -> {
+            requireOwner(b, member);
+            if (b.isLive()) throw new ConflictException(STILL_LIVE);
+            repository.delete(b);
+            return true;
+        }).orElse(false));
     }
 
     private static void requireOwner(Broadcast broadcast, MemberRef member) {

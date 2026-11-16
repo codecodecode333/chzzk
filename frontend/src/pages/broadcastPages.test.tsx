@@ -830,3 +830,150 @@ describe('시청 screen', () => {
     expect(mocked.watch).not.toHaveBeenCalled()
   })
 })
+
+describe('시청 screen controls for the 소유자', () => {
+  const live = {
+    id: 7,
+    title: '저녁 산책',
+    status: 'LIVE',
+    startedAt: '2026-11-15T10:00:00Z',
+    endedAt: null,
+    owner: OWNER,
+    whepUrl: '/live/broadcasts/7/whep',
+  }
+  const ended = { ...live, status: 'ENDED', endedAt: '2026-11-15T10:42:00Z', whepUrl: null }
+
+  const problem = (status: number, detailText: string) =>
+    HttpResponse.json(
+      { type: 'about:blank', title: 'Error', status, detail: detailText, instance: '/api/broadcasts/7' },
+      { status, headers: { 'Content-Type': 'application/problem+json' } },
+    )
+
+  beforeEach(() => {
+    mocked.watch.mockResolvedValue({ stream: fakeStream, stop: vi.fn() })
+  })
+
+  it('shows 제목 수정 and 삭제 to no one but the 소유자', async () => {
+    server.use(http.get('/api/broadcasts/7', () => HttpResponse.json(ended)))
+
+    const asVisitor = renderAt('/broadcasts/7')
+    expect(await screen.findByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '제목 수정' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '삭제' })).not.toBeInTheDocument()
+    asVisitor.unmount()
+
+    loggedInAs({ id: 2, nickname: '시청자' })
+    const asOther = renderAt('/broadcasts/7')
+    expect(await screen.findByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '제목 수정' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '삭제' })).not.toBeInTheDocument()
+    asOther.unmount()
+
+    loggedInAs(OWNER)
+    renderAt('/broadcasts/7')
+    expect(await screen.findByRole('button', { name: '제목 수정' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '삭제' })).toBeInTheDocument()
+  })
+
+  it('offers 제목 수정 and the 송출 screen link while 방송 중, but no 삭제', async () => {
+    loggedInAs(OWNER)
+    server.use(http.get('/api/broadcasts/7', () => HttpResponse.json(live)))
+
+    renderAt('/broadcasts/7')
+
+    expect(await screen.findByRole('button', { name: '제목 수정' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '송출 화면으로' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '삭제' })).not.toBeInTheDocument()
+  })
+
+  it('renames inline with the title rule, and can be cancelled', async () => {
+    const user = userEvent.setup()
+    loggedInAs(OWNER)
+    let sent: unknown
+    server.use(
+      http.get('/api/broadcasts/7', () => HttpResponse.json(live)),
+      http.patch('/api/broadcasts/7', async ({ request }) => {
+        sent = await request.json()
+        return HttpResponse.json({ ...live, title: '아침 산책' })
+      }),
+    )
+    renderAt('/broadcasts/7')
+
+    await user.click(await screen.findByRole('button', { name: '제목 수정' }))
+    await user.clear(screen.getByLabelText('제목'))
+    expect(screen.getByText('제목을 입력해 주세요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '취소' }))
+    expect(screen.getByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '제목 수정' }))
+    expect(screen.getByLabelText('제목')).toHaveValue('저녁 산책')
+    await user.clear(screen.getByLabelText('제목'))
+    await user.type(screen.getByLabelText('제목'), '아침 산책')
+    await user.click(screen.getByRole('button', { name: '저장' }))
+
+    expect(await screen.findByRole('heading', { name: '아침 산책' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('제목')).not.toBeInTheDocument()
+    expect(sent).toEqual({ title: '아침 산책' })
+  })
+
+  it('shows the server 403 message when a rename is refused', async () => {
+    const user = userEvent.setup()
+    loggedInAs(OWNER)
+    server.use(
+      http.get('/api/broadcasts/7', () => HttpResponse.json(ended)),
+      http.patch('/api/broadcasts/7', () => problem(403, '내 방송만 제어할 수 있습니다.')),
+    )
+    renderAt('/broadcasts/7')
+
+    await user.click(await screen.findByRole('button', { name: '제목 수정' }))
+    await user.type(screen.getByLabelText('제목'), '!')
+    await user.click(screen.getByRole('button', { name: '저장' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('내 방송만 제어할 수 있습니다.')
+    expect(screen.getByLabelText('제목')).toHaveValue('저녁 산책!')
+  })
+
+  it('deletes an ended 방송 only after confirmation, then returns home', async () => {
+    const user = userEvent.setup()
+    loggedInAs(OWNER)
+    let deletes = 0
+    server.use(
+      http.get('/api/broadcasts/7', () => HttpResponse.json(ended)),
+      http.delete('/api/broadcasts/7', () => {
+        deletes++
+        return new HttpResponse(null, { status: 204 })
+      }),
+      http.get('/api/broadcasts', () => HttpResponse.json(emptyPage)),
+    )
+    const confirm = vi.fn<(message?: string) => boolean>().mockReturnValueOnce(false).mockReturnValueOnce(true)
+    vi.stubGlobal('confirm', confirm)
+    renderAt('/broadcasts/7')
+
+    await user.click(await screen.findByRole('button', { name: '삭제' }))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(deletes).toBe(0)
+    expect(screen.getByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '삭제' }))
+
+    expect(await screen.findByText(/아직 방송이 없습니다/)).toBeInTheDocument()
+    expect(deletes).toBe(1)
+  })
+
+  it('shows the server 409 message when a delete is refused', async () => {
+    const user = userEvent.setup()
+    loggedInAs(OWNER)
+    server.use(
+      http.get('/api/broadcasts/7', () => HttpResponse.json(ended)),
+      http.delete('/api/broadcasts/7', () => problem(409, '방송 중인 방송은 삭제할 수 없습니다. 방송을 먼저 종료하세요.')),
+    )
+    vi.stubGlobal('confirm', () => true)
+    renderAt('/broadcasts/7')
+
+    await user.click(await screen.findByRole('button', { name: '삭제' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('방송을 먼저 종료하세요.')
+    expect(screen.getByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
+  })
+})

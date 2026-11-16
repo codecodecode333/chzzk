@@ -120,6 +120,8 @@ also need the CSRF token (`403` without it); the frontend's HTTP client sends it
 | 방송 시작 (`POST /api/broadcasts`) | 회원 (becomes its 소유자); one 방송 중 방송 per 회원 | `401`; `409` with `broadcastId` of the 방송 중 one |
 | 방송 종료 (`POST /api/broadcasts/{id}/end`) | the 소유자, by login session | `401` / `403` |
 | 이어서 송출 (`POST /api/broadcasts/{id}/publish-key`) | the 소유자, while 방송 중 | `401` / `403`; `409` once 종료 |
+| 방송 제목 수정 (`PATCH /api/broadcasts/{id}`) | the 소유자, 방송 중 or 종료 | `401` / `403` |
+| 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글) | the 소유자, once 종료 | `401` / `403`; `409` while 방송 중 |
 | 댓글 목록 (`GET /api/vods/{id}/comments`) | anyone | `404` for an unknown VOD |
 | 댓글 쓰기 (`POST /api/vods/{id}/comments`) | 회원 | `401` |
 | 댓글 수정·삭제 (`PATCH`/`DELETE /api/comments/{id}`) | the 작성자 | `401` visitor, `403` another 회원 |

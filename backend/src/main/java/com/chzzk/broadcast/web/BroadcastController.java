@@ -12,7 +12,9 @@ import java.net.URI;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -55,9 +57,22 @@ class BroadcastController {
 
     @GetMapping("/{id}")
     BroadcastResponse detail(@PathVariable long id) {
-        Broadcast b = broadcasts.get(id).orElseThrow(() -> notFound(id));
-        return new BroadcastResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt(),
-                Owner.of(b), b.isLive() ? mediaUrl(b, "whep") : null);
+        return BroadcastResponse.of(broadcasts.get(id).orElseThrow(() -> notFound(id)));
+    }
+
+    record RenameRequest(String title) {}
+
+    /** "제목 수정" by the 소유자, 방송 중 or 종료. */
+    @PatchMapping("/{id}")
+    BroadcastResponse rename(@PathVariable long id, @RequestBody RenameRequest request) {
+        return BroadcastResponse.of(broadcasts.rename(id, request.title()).orElseThrow(() -> notFound(id)));
+    }
+
+    /** "삭제" of a 종료 방송 by the 소유자, with its 댓글; a 방송 중 방송 is 409 until it ends. */
+    @DeleteMapping("/{id}")
+    ResponseEntity<Void> delete(@PathVariable long id) {
+        if (!broadcasts.delete(id)) throw notFound(id);
+        return ResponseEntity.noContent().build();
     }
 
     /** "방송 종료" by the 소유자's login session; ending twice is a successful no-op. */
@@ -113,5 +128,10 @@ class BroadcastController {
 
     /** {@code whepUrl} is {@code null} unless the 방송 is 방송 중. */
     record BroadcastResponse(Long id, String title, BroadcastStatus status, Instant startedAt, Instant endedAt,
-                             Owner owner, String whepUrl) {}
+                             Owner owner, String whepUrl) {
+        static BroadcastResponse of(Broadcast b) {
+            return new BroadcastResponse(b.getId(), b.getTitle(), b.getStatus(), b.getStartedAt(), b.getEndedAt(),
+                    Owner.of(b), b.isLive() ? mediaUrl(b, "whep") : null);
+        }
+    }
 }
