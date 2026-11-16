@@ -4,6 +4,7 @@ import com.chzzk.common.web.ApiProblemHandler;
 import com.chzzk.common.web.Problems;
 import com.chzzk.vod.domain.InvalidVodException;
 import com.chzzk.vod.domain.UnsupportedVideoException;
+import com.chzzk.vod.domain.VodNotFoundException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -13,7 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
-/** Maps VOD's own failures (bad registration input, non-MP4 files, oversize uploads) to the shared Problem Details. */
+/** Maps VOD's own failures (bad registration input, unknown VODs, non-MP4 files, oversize uploads) to the shared Problem Details. */
 @RestControllerAdvice
 @Order(ApiProblemHandler.FEATURE_ORDER)
 class VodProblemHandler {
@@ -34,6 +35,11 @@ class VodProblemHandler {
     @ExceptionHandler
     ProblemDetail invalidVod(InvalidVodException e) {
         return Problems.fieldError(HttpStatus.BAD_REQUEST, e.field(), e.getMessage());
+    }
+
+    @ExceptionHandler
+    ProblemDetail vodNotFound(VodNotFoundException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
     }
 
     @ExceptionHandler

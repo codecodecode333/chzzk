@@ -224,6 +224,21 @@ class CommentApiTest {
     }
 
     @Test
+    void deletingTheVodRemovesItsComments() {
+        ApiSession owner = ApiSession.member(http);
+        long vodId = vodBy(owner);
+        ApiSession author = ApiSession.member(http);
+        Object id = author.post(commentsOf(vodId), Map.of("content", "사라질 댓글")).getBody().get("id");
+
+        assertThat(owner.delete("/api/vods/" + vodId).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+        assertThat(ApiSession.visitor(http).get(commentsOf(vodId)).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // the 댓글 itself is gone, not merely unlisted
+        assertThat(author.patch("/api/comments/" + id, Map.of("content", "x")).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
     void onlyTheAuthorDeletes() {
         long vodId = vod();
         ApiSession author = ApiSession.member(http);

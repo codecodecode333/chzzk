@@ -32,6 +32,7 @@ function renderVod(path = '/vods/1') {
         description: null,
         createdAt: '2026-11-15T09:00:00Z',
         streamUrl: '/api/vods/1/stream',
+        owner: { id: 99, nickname: '소유자' },
       }),
     ),
   )

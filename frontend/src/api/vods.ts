@@ -1,4 +1,5 @@
 import { isAxiosError } from 'axios'
+import type { Member } from './auth'
 import { client, type Page } from './client'
 
 export { apiErrorMessage, type Page, type ProblemDetail } from './client'
@@ -12,6 +13,8 @@ export interface VodSummary {
   id: number
   title: string
   createdAt: string
+  /** The 회원 who registered it. */
+  owner: Member
 }
 
 export interface Vod {
@@ -20,6 +23,8 @@ export interface Vod {
   description: string | null
   createdAt: string
   streamUrl: string
+  /** The 회원 who registered it; only they may edit or delete it. */
+  owner: Member
 }
 
 export interface RegisterVodInput {
@@ -74,4 +79,21 @@ export async function getVod(id: string): Promise<Vod | null> {
     if (isAxiosError(error) && error.response?.status === 404) return null
     throw error
   }
+}
+
+export interface UpdateVodInput {
+  title: string
+  /** An empty description removes it. */
+  description: string
+}
+
+/** 소유자 only (the server answers others with 401/403); resolves to the updated VOD. */
+export async function updateVod(id: number, input: UpdateVodInput): Promise<Vod> {
+  const { data } = await client.patch<Vod>(`/vods/${id}`, input)
+  return data
+}
+
+/** 소유자 only: removes the VOD, its 영상 파일 and its 댓글. */
+export async function deleteVod(id: number): Promise<void> {
+  await client.delete(`/vods/${id}`)
 }
