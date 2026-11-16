@@ -9,11 +9,17 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
-/** A registered VOD and its single 영상 파일 (1:1, so the file columns live on this row). Immutable once registered. */
+/**
+ * A registered VOD and its single 영상 파일 (1:1, so the file columns live on this row), owned by the 회원 who
+ * registered it. Only the title and description change after registration.
+ */
 @Entity
 @Table(name = "vod")
 public class Vod {
@@ -46,9 +52,15 @@ public class Vod {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "owner_id", nullable = false, updatable = false)
+    private VodOwner owner;
+
     protected Vod() {}
 
-    Vod(String title, String description, StoredVideo video, VideoFileMetadata metadata, Instant createdAt) {
+    Vod(VodOwner owner, String title, String description, StoredVideo video, VideoFileMetadata metadata,
+        Instant createdAt) {
+        this.owner = owner;
         this.title = title;
         this.description = description;
         this.storageType = video.storageType();
@@ -68,4 +80,8 @@ public class Vod {
     public String getContentType() { return contentType; }
     public long getSizeBytes() { return sizeBytes; }
     public Instant getCreatedAt() { return createdAt; }
+    public VodOwner getOwner() { return owner; }
+
+    void changeTitle(String title) { this.title = title; }
+    void changeDescription(String description) { this.description = description; }
 }

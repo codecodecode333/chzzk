@@ -3,6 +3,8 @@ package com.chzzk.vod.web;
 import com.chzzk.common.web.PageResponse;
 import com.chzzk.common.web.Paging;
 import com.chzzk.vod.domain.Vod;
+import com.chzzk.vod.domain.VodNotFoundException;
+import com.chzzk.vod.domain.VodOwner;
 import com.chzzk.vod.domain.VodService;
 import com.chzzk.vod.domain.VodService.VideoFileMetadata;
 import java.io.IOException;
@@ -11,17 +13,18 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.Objects;
 import org.springframework.core.io.Resource;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/vods")
@@ -70,7 +73,20 @@ class VodController {
 
     @GetMapping("/{id}")
     VodResponse detail(@PathVariable long id) {
-        return VodResponse.of(vods.find(id).orElseThrow(() -> notFound(id)));
+        return VodResponse.of(vods.find(id).orElseThrow(() -> new VodNotFoundException(id)));
+    }
+
+    /** 소유자 only. An absent (or {@code null}) field is left unchanged. */
+    @PatchMapping(path = "/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    VodResponse update(@PathVariable long id, @RequestBody UpdateVodRequest request) {
+        return VodResponse.of(vods.update(id, request.title(), request.description()));
+    }
+
+    /** 소유자 only. */
+    @DeleteMapping("/{id}")
+    ResponseEntity<Void> delete(@PathVariable long id) {
+        vods.delete(id);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -79,24 +95,30 @@ class VodController {
      */
     @GetMapping("/{id}/stream")
     ResponseEntity<Resource> stream(@PathVariable long id) {
-        Resource video = vods.openVideo(id).orElseThrow(() -> notFound(id));
+        Resource video = vods.openVideo(id).orElseThrow(() -> new VodNotFoundException(id));
         return ResponseEntity.ok().contentType(VIDEO_MP4).body(video);
     }
 
-    private static ResponseStatusException notFound(long id) {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, id + "번 다시보기를 찾을 수 없습니다.");
-    }
+    record UpdateVodRequest(String title, String description) {}
 
-    record VodResponse(Long id, String title, String description, Instant createdAt, String streamUrl) {
-        static VodResponse of(Vod vod) {
-            return new VodResponse(vod.getId(), vod.getTitle(), vod.getDescription(), vod.getCreatedAt(),
-                    vodPath(vod) + "/stream");
+    /** The VOD's 소유자 as clients see one. */
+    record OwnerResponse(long id, String nickname) {
+        static OwnerResponse of(VodOwner owner) {
+            return new OwnerResponse(owner.getId(), owner.getNickname());
         }
     }
 
-    record VodSummary(Long id, String title, Instant createdAt) {
+    record VodResponse(Long id, String title, String description, Instant createdAt, String streamUrl,
+                       OwnerResponse owner) {
+        static VodResponse of(Vod vod) {
+            return new VodResponse(vod.getId(), vod.getTitle(), vod.getDescription(), vod.getCreatedAt(),
+                    vodPath(vod) + "/stream", OwnerResponse.of(vod.getOwner()));
+        }
+    }
+
+    record VodSummary(Long id, String title, Instant createdAt, OwnerResponse owner) {
         static VodSummary of(Vod vod) {
-            return new VodSummary(vod.getId(), vod.getTitle(), vod.getCreatedAt());
+            return new VodSummary(vod.getId(), vod.getTitle(), vod.getCreatedAt(), OwnerResponse.of(vod.getOwner()));
         }
     }
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiErrorMessage, getVod, type Vod } from '../api/vods'
 import { LoadError } from './LoadError'
-import { formatDate } from '../format'
+import { VodInfo } from '../vods/VodInfo'
 
 export function VodDetailPage() {
   const { id = '' } = useParams()
@@ -62,11 +62,7 @@ export function VodDetailPage() {
           className="aspect-video w-full rounded-lg bg-black"
         />
       )}
-      <h1 className="mt-4 text-2xl font-bold">{vod.title}</h1>
-      <time dateTime={vod.createdAt} className="text-sm text-zinc-400">
-        {formatDate(vod.createdAt)}
-      </time>
-      {vod.description && <p className="mt-4 whitespace-pre-wrap text-zinc-300">{vod.description}</p>}
+      <VodInfo vod={vod} onUpdated={setVod} />
     </article>
   )
 }

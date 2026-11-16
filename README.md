@@ -106,8 +106,15 @@ also need the CSRF token (`403` without it); the frontend's HTTP client sends it
 | 로그아웃 (`POST /api/auth/logout`) | anyone (ends the session if there is one) | — |
 | Who am I (`GET /api/me`) | 회원 | `401` |
 | VOD 목록·상세·재생, 방송 목록·상세 | anyone | — |
-| VOD 등록, 방송 시작·종료 | anyone for now (ownership arrives with the next tickets) | — |
+| VOD 등록 (`POST /api/vods`) | 회원 (becomes the VOD's 소유자) | `401` |
+| VOD 수정·삭제 (`PATCH`, `DELETE /api/vods/{id}`) | the VOD's 소유자 | `401` / `403` |
+| 방송 시작·종료 | anyone for now (ownership arrives with the next tickets) | — |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
+
+Upgrading an existing database: migration `V4__vod_owner.sql` deletes every VOD row registered before 회원 existed
+(nobody can own them), but not their 영상 파일. To reclaim the space, delete the leftover files under the storage
+root while no new VODs exist yet (e.g. `rm -rf backend/data/videos`), or keep only the files still referenced by
+`SELECT storage_key FROM vod`.
 
 ## Tests
 

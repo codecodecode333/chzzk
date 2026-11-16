@@ -48,13 +48,19 @@ export type VodFormField = keyof VodFormValues
 
 export type VodFormErrors = Partial<Record<VodFormField, string>>
 
-export function validateVodForm(values: VodFormValues): VodFormErrors {
+/** The title and description rules alone: registration's, and the 소유자's edit form's. */
+export function validateVodDetails(values: Pick<VodFormValues, 'title' | 'description'>): VodFormErrors {
   const errors: VodFormErrors = {}
   const title = validateTitle(values.title)
   if (title) errors.title = title
   if (charCount(values.description) > DESCRIPTION_MAX_CHARS) {
     errors.description = `설명은 ${DESCRIPTION_MAX_CHARS.toLocaleString('en-US')}자 이하로 입력해 주세요.`
   }
+  return errors
+}
+
+export function validateVodForm(values: VodFormValues): VodFormErrors {
+  const errors = validateVodDetails(values)
   if (!values.file) {
     errors.file = '영상 파일을 선택해 주세요.'
   } else if (!values.file.name.toLowerCase().endsWith('.mp4')) {
