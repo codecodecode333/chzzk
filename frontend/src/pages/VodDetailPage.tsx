@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 import { apiErrorMessage, getVod, type Vod } from '../api/vods'
 import { LoadError } from './LoadError'
 import { VodInfo } from '../vods/VodInfo'
+import { CommentSection } from '../comments/CommentSection'
 
 export function VodDetailPage() {
   const { id = '' } = useParams()
@@ -63,6 +64,7 @@ export function VodDetailPage() {
         />
       )}
       <VodInfo vod={vod} onUpdated={setVod} />
+      <CommentSection target={{ kind: 'vod', id: vod.id }} />
     </article>
   )
 }
