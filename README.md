@@ -86,6 +86,8 @@ calling 라이브 done (ticket 07). Use two phones and a desktop browser; "list"
 - [ ] The list shows the 방송 under 방송 중 with the 방송 중 badge and A's 닉네임.
 - [ ] Press 방송 종료 and confirm: the 송출 phone shows 종료됨 and its camera turns off; every 시청자 switches to
       "종료된 방송입니다"; the list shows it under 종료된 방송 with the 종료 badge and both its start and end time.
+- [ ] Second 회원: on the iPhone (logged in as B) open A's 시청 링크 while 방송 중 and again after 종료: neither
+      shows 송출 ("이어서 송출"), 제목 수정 or 삭제 controls, while A's phone shows 제목 수정 (and 삭제 once 종료).
 
 **B. iPhone Safari as 송출자 → Android Chrome as 시청자**
 - [ ] The same flow as A with the roles swapped (log in on the iPhone as the 송출자): start, sub-second playback,
@@ -104,34 +106,58 @@ calling 라이브 done (ticket 07). Use two phones and a desktop browser; "list"
 - [ ] Kill the 송출 tab (close it, or lock the phone): within about 70s the 방송 shows 종료 in the list and
       "종료된 방송입니다" for the 시청자.
 
-## Access policy
+## 공개 범위 (access policy)
 
-Not logged in → `401`, logged in but not allowed → `403`, both as Problem Details. Writes (POST/PUT/PATCH/DELETE)
-also need the CSRF token (`403` without it); the frontend's HTTP client sends it by itself.
+Who may do what, as the server enforces it (the pages only hide controls; the server stays the authority).
+누구나 = anyone, logged in or not; 로그인 회원 = any logged-in 회원; 소유자 = the 회원 who registered the VOD or started
+the 방송; 작성자 = the 회원 who wrote the 댓글.
+
+Not logged in → `401`, logged in but not the 소유자/작성자 → `403`, a conflict with the current state → `409`, all as
+Problem Details. Login is checked first, so a visitor gets `401` even for an unknown id; a 회원 gets `404` for an unknown
+VOD, 방송 or 댓글. Writes (POST/PUT/PATCH/DELETE) also need the CSRF token (`403` without it); the frontend's HTTP
+client sends it by itself.
 
 | Action | Who | Otherwise |
 | --- | --- | --- |
-| 회원가입, 로그인 (`POST /api/auth/signup`, `/login`) | anyone | — |
-| 로그아웃 (`POST /api/auth/logout`) | anyone (ends the session if there is one) | — |
-| Who am I (`GET /api/me`) | 회원 | `401` |
-| VOD 목록·상세·재생, 방송 목록·상세 | anyone | — |
-| VOD 등록 (`POST /api/vods`) | 회원 (becomes the VOD's 소유자) | `401` |
-| VOD 수정·삭제 (`PATCH`, `DELETE /api/vods/{id}`) | the VOD's 소유자 | `401` / `403` |
-| 방송 시작 (`POST /api/broadcasts`) | 회원 (becomes its 소유자); one 방송 중 방송 per 회원 | `401`; `409` with `broadcastId` of the 방송 중 one |
-| 방송 종료 (`POST /api/broadcasts/{id}/end`) | the 소유자, by login session | `401` / `403` |
-| 이어서 송출 (`POST /api/broadcasts/{id}/publish-key`) | the 소유자, while 방송 중 | `401` / `403`; `409` once 종료 |
-| 방송 제목 수정 (`PATCH /api/broadcasts/{id}`) | the 소유자, 방송 중 or 종료 | `401` / `403` |
-| 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글) | the 소유자, once 종료 | `401` / `403`; `409` while 방송 중 |
-| 댓글 목록 (`GET /api/vods/{id}/comments`) | anyone | `404` for an unknown VOD |
-| 댓글 쓰기 (`POST /api/vods/{id}/comments`) | 회원 | `401` |
-| 댓글 수정·삭제 (`PATCH`/`DELETE /api/comments/{id}`) | the 작성자 | `401` visitor, `403` another 회원 |
+| 회원가입 (`POST /api/auth/signup`; logs the new 회원 in) | 누구나 | `409` naming the field for a taken email or 닉네임 |
+| 로그인 (`POST /api/auth/login`) | 누구나 | `401` with one message for a wrong email or password |
+| 로그아웃 (`POST /api/auth/logout`) | 누구나 (ends the session if there is one) | — |
+| 내 정보 (`GET /api/me`) | 로그인 회원 | `401` |
+| VOD 목록·상세 (`GET /api/vods`, `/api/vods/{id}`), 재생 (`GET /api/vods/{id}/stream`) | 누구나 | — |
+| 방송 목록·상세 (`GET /api/broadcasts`, `/api/broadcasts/{id}`) | 누구나 | — |
+| 방송 시청 (WHEP through MediaMTX) | 누구나, while 방송 중 | refused by the auth callback once 종료 |
+| VOD 등록 (`POST /api/vods`) | 로그인 회원 (becomes its 소유자) | `401` |
+| VOD 수정·삭제 (`PATCH`, `DELETE /api/vods/{id}`; 삭제 takes its 영상 파일 and 댓글) | 소유자 | `401` / `403` |
+| 방송 시작 (`POST /api/broadcasts`) | 로그인 회원 (becomes its 소유자); one 방송 중 방송 per 회원 | `401`; `409` with `broadcastId` of the 방송 중 one |
+| 방송 종료 (`POST /api/broadcasts/{id}/end`) | 소유자, by login session; ending twice is harmless | `401` / `403` |
+| 이어서 송출 (`POST /api/broadcasts/{id}/publish-key`, a fresh 송출 키) | 소유자, while 방송 중 | `401` / `403`; `409` once 종료 |
+| 송출 (WHIP through MediaMTX) | whoever holds the 방송's current 송출 키, while 방송 중 | refused by the auth callback |
+| 방송 제목 수정 (`PATCH /api/broadcasts/{id}`) | 소유자, 방송 중 or 종료 | `401` / `403` |
+| 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글) | 소유자, once 종료 | `401` / `403`; `409` while 방송 중 |
+| 댓글 목록 (`GET /api/vods/{id}/comments`, `/api/broadcasts/{id}/comments`) | 누구나 | `404` for an unknown VOD or 방송 |
+| 댓글 쓰기 (`POST` to the same paths; on a 방송 중 or 종료 방송) | 로그인 회원 | `401`; `404` for an unknown VOD or 방송 |
+| 댓글 수정·삭제 (`PATCH`, `DELETE /api/comments/{id}`) | 작성자 | `401` / `403` |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
 
-Upgrading an existing database: migration `V4__vod_owner.sql` deletes every VOD row registered before 회원 existed
-(nobody can own them), but not their 영상 파일. To reclaim the space, delete the leftover files under the storage
-root while no new VODs exist yet (e.g. `rm -rf backend/data/videos`), or keep only the files still referenced by
-`SELECT storage_key FROM vod`.
-Likewise `V6__broadcast_owner.sql` deletes every 방송 started before 회원 existed (방송 have no files to clean up).
+시청, 목록 and 댓글 목록 need no login: a VOD or 방송 link shared with someone should just play, and reading the 댓글
+next to it reveals nothing that isn't already public (only the 작성자's 닉네임, never an email). Login is asked only
+where a write has to be tied to a 회원: who owns a VOD or 방송, who wrote a 댓글.
+
+### Running with login
+
+Nothing extra beyond the steps above: Flyway creates the 회원 and session tables on backend start, and sessions live
+in the same PostgreSQL (`.env` is only needed for 라이브 on a phone). Sign up at `/signup`; there are no seeded 회원.
+
+### Upgrading an existing database
+
+Migration `V4__vod_owner.sql` deletes every VOD row registered before 회원 existed (nobody can own them), and
+`V6__broadcast_owner.sql` deletes every 방송 started before 회원 existed. Neither touches 영상 파일, so
+the deleted VODs' files stay on disk under `videos/` in the storage root (`backend/data/` or `VOD_STORAGE_ROOT`).
+To reclaim the space:
+- right after upgrading, before any new VOD is registered: delete that folder (e.g. `rm -rf backend/data/videos`);
+- later: keep only the files still referenced by a VOD (`docker compose exec postgres psql -U chzzk -d chzzk -c
+  "SELECT storage_key FROM vod"`; each key is a path relative to the storage root) and delete the rest.
+방송 have no files to clean up.
 
 ## Tests
 
