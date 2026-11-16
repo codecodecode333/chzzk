@@ -16,8 +16,23 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  session:
+    # Login sessions live in PostgreSQL (ADR-0003), so a backend restart keeps everyone logged in. Flyway creates the
+    # tables (V3); the idle timeout comes from server.servlet.session.timeout.
+    jdbc:
+      initialize-schema: never
+  autoconfigure:
+    # No generated in-memory user: 회원 log in through the member module, not a UserDetailsService.
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 
 server:
+  servlet:
+    session:
+      # 7 days without a request ends a login (Spring Session's idle timeout).
+      timeout: 7d
+      cookie:
+        http-only: true
+        same-site: lax
   tomcat:
     # After rejecting an oversize upload (413), keep reading and discarding up to this much of the rest of the
     # body so the browser receives the 413 instead of a connection reset (Tomcat's default is only 2MB).

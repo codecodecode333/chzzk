@@ -1,6 +1,6 @@
 # 치지직 (Chzzk)
 
-로그인 없이 VOD(화면 표기 "다시보기")를 등록·시청하고, 휴대폰으로 라이브 방송을 송출·시청하는 MVP. 용어는 `GLOSSARY.md`, 설계 결정은 `docs/adr/` 참고.
+회원가입·로그인하고, VOD(화면 표기 "다시보기")를 등록·시청하고, 휴대폰으로 라이브 방송을 송출·시청하는 MVP. 용어는 `GLOSSARY.md`, 설계 결정은 `docs/adr/` 참고.
 
 ## Layout
 
@@ -95,6 +95,20 @@ calling 라이브 done (ticket 07). Use two phones and a desktop browser; "list"
 - [ ] Kill the 송출 tab (close it, or lock the phone): within about 70s the 방송 shows 종료 in the list and
       "종료된 방송입니다" for the 시청자.
 
+## Access policy
+
+Not logged in → `401`, logged in but not allowed → `403`, both as Problem Details. Writes (POST/PUT/PATCH/DELETE)
+also need the CSRF token (`403` without it); the frontend's HTTP client sends it by itself.
+
+| Action | Who | Otherwise |
+| --- | --- | --- |
+| 회원가입, 로그인 (`POST /api/auth/signup`, `/login`) | anyone | — |
+| 로그아웃 (`POST /api/auth/logout`) | anyone (ends the session if there is one) | — |
+| Who am I (`GET /api/me`) | 회원 | `401` |
+| VOD 목록·상세·재생, 방송 목록·상세 | anyone | — |
+| VOD 등록, 방송 시작·종료 | anyone for now (ownership arrives with the next tickets) | — |
+| MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
+
 ## Tests
 
 ```sh
@@ -103,13 +117,38 @@ cd frontend && npm test              # Page components: Vitest + Testing Library
 ```
 
 Conventions:
+- Backend tests act as a visitor or a 회원 only through the real auth API, with `com.chzzk.support.ApiSession` (test
+  sources): `ApiSession.visitor(http)` (CSRF token fetched), `ApiSession.member(http)` (a fresh unique 회원, signed up
+  and logged in; `.member()` gives its `id`, `nickname`, `email`, `password`), `signUp(...)`, `logIn(...)`. Each
+  instance keeps its own `SESSION`/`XSRF-TOKEN` cookies and sends `X-XSRF-TOKEN` on every request, so several 회원 can
+  act in one test; use its `get/post/patch/delete` (JSON) or `exchange(path, method, body-or-HttpEntity, type)`.
+  `withoutCsrfToken()` and `copy()` cover CSRF rejection and stale-cookie cases (`member.AuthApiTest`).
 - Backend tests go through HTTP only (`backend/src/test/.../VodApiTest.java`, `BroadcastApiTest.java`); video storage is rooted in a temp dir. 방송 tests replace the clock (`MutableClock`) and the media server gateway (`FakeMediaServerGateway`) via `BroadcastTestConfig`.
 - Frontend tests render routes via `AppRoutes` in a `MemoryRouter` and register MSW handlers per test (`src/test/server.ts`).
+  By default everyone is a visitor (`/api/me` → 401) and `GET /api/auth/csrf` answers `CSRF_TOKEN`; call
+  `loggedInAs({ id, nickname })` to be a 회원 (it returns `logIn`/`logOut` to switch mid-test). See
+  `src/pages/authPages.test.tsx`.
+- 회원 auth (ADR-0003): the member module `com.chzzk.member` owns signup, login, the email/password/닉네임 rules
+  (`MemberRules`) and BCrypt. Features never touch Spring Security: inject `common.auth.CurrentMember` into the domain
+  service and call `require()` (→ `MemberRef(id, nickname)`, or 401 for a visitor) or `find()`. Shared access errors
+  live in `common.error`: throw `UnauthenticatedException` (401), `ForbiddenException` (403, not the 소유자/작성자) or
+  `ConflictException` (409; `ConflictException.onField(field, msg)` names a form field, `.with(name, value)` adds a
+  property such as the existing 방송's id); `ApiProblemHandler` turns them into Problem Details with Korean messages.
+  `common.auth.SecurityConfig` holds the URL-level policy (today every URL is reachable and login/ownership are
+  enforced in services), the cookie-to-header CSRF (`XSRF-TOKEN` cookie → `X-XSRF-TOKEN` header; MediaMTX's callback
+  is exempt) and logout. Sessions live in PostgreSQL (Spring Session JDBC, `SESSION` cookie: HttpOnly, SameSite=Lax,
+  7-day idle timeout).
+- Frontend 회원 state: `useCurrentMember()` (`src/members/currentMemberContext.ts`) gives `{ member, loading, refresh,
+  logOut }`; `CurrentMemberProvider` (rendered by `AppRoutes`) loads `/api/me` once. Guard a screen that needs login
+  with `<RequireMember>` (`src/members/RequireMember.tsx`): a visitor goes to `/login?next=<here>`. Link to login with
+  `withNext('/login', path)` and only follow `next` through `safeNext` (`src/members/next.ts`, in-app paths only). The
+  shared `client.ts` adds the CSRF header to every write by itself; show per-field server errors with
+  `apiFieldErrors(error)` and form fields with `forms/Field.tsx`.
 - Backend packages: `com.chzzk` is the feature-neutral application root (`BackendApplication`). Each feature is a module beneath it (`com.chzzk.vod` with `domain/`, `storage/`, `web/`; `com.chzzk.broadcast` with `domain/`, `media/`, `web/`). Code shared by features lives in `com.chzzk.common` (e.g. `common.web`, `common.text.Title` for the shared title rule); features don't depend on each other.
 - 방송 status rules, the 송출 키 (`PublishKey`), publish/read authorization and the 60s auto-end (`sweep`) live only in `broadcast.domain.BroadcastLifecycle`; every 방송 중 → 종료 is a conditional update, so 방송 종료 and the auto-end can't both win; `broadcast.PublishingMonitor` feeds it from the media server every 10s (API tests switch its schedule off with `broadcast.publishing-monitor.enabled=false` and call `check()` themselves). MediaMTX is reached only through `broadcast.media.MediaServerGateway` (`MediaMtxGateway`); `MediaPaths` is the one `broadcasts/{id}` mapping.
 - Every API error is RFC 7807 Problem Details (Spring `ProblemDetail`: `type, title, status, detail, instance`, plus `errors: [{field, message}]` for field validation, built with `common.web.Problems.fieldError`). `common.web.ApiProblemHandler` covers Spring's own exceptions and the 500 catch-all; each feature maps its domain exceptions in its own `@RestControllerAdvice` ordered `ApiProblemHandler.FEATURE_ORDER` (e.g. `vod.web.VodProblemHandler`). Throw `ResponseStatusException` or a mapped domain exception; don't hand-roll error bodies.
   The one exception is MediaMTX's auth callback (`broadcast.web.MediaServerAuthController`): MediaMTX's contract wants
   an empty 2xx to allow and any other status to deny, so it answers a bare `204`/`401` with no body.
 - Registration form rules live in `frontend/src/vods/validateVodForm.ts` (pure, mirrors the server), separate from how the form submits.
-- All frontend data access lives in `frontend/src/api/` (`vods.ts`, `broadcasts.ts`, shared `client.ts`); extend it rather than calling the network from pages.
+- All frontend data access lives in `frontend/src/api/` (`vods.ts`, `broadcasts.ts`, `auth.ts`, shared `client.ts`); extend it rather than calling the network from pages.
 - Only `frontend/src/media/media.ts` touches the camera, `RTCPeerConnection` and WHIP/WHEP; pages call it and page tests `vi.mock` it (`src/pages/broadcastPages.test.tsx`).

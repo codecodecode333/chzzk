@@ -2,6 +2,7 @@ package com.chzzk.broadcast;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.chzzk.support.ApiSession;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -63,8 +64,16 @@ class BroadcastApiTest {
 
     static final ParameterizedTypeReference<Map<String, Object>> JSON = new ParameterizedTypeReference<>() {};
 
+    private ApiSession browser;
+
+    /** The browser the writes come from: a visitor with a CSRF token (방송 need no login yet). */
+    ApiSession browser() {
+        if (browser == null) browser = ApiSession.visitor(http);
+        return browser;
+    }
+
     ResponseEntity<Map<String, Object>> start(String title) {
-        return http.exchange("/api/broadcasts", HttpMethod.POST, new HttpEntity<>(Map.of("title", title)), JSON);
+        return browser().exchange("/api/broadcasts", HttpMethod.POST, Map.of("title", title), JSON);
     }
 
     @Test
@@ -125,7 +134,8 @@ class BroadcastApiTest {
     ResponseEntity<Map<String, Object>> end(Object id, String publishKey) {
         HttpHeaders headers = new HttpHeaders();
         if (publishKey != null) headers.setBearerAuth(publishKey);
-        return http.exchange("/api/broadcasts/" + id + "/end", HttpMethod.POST, new HttpEntity<>(headers), JSON);
+        return browser().exchange("/api/broadcasts/" + id + "/end", HttpMethod.POST, new HttpEntity<>(headers),
+                JSON);
     }
 
     static void assertProblem(ResponseEntity<Map<String, Object>> response, HttpStatus status) {

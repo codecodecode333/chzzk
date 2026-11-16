@@ -2,6 +2,7 @@ package com.chzzk.vod;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.chzzk.support.ApiSession;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -81,6 +82,14 @@ class VodApiTest {
     @Autowired
     JdbcTemplate jdbc;
 
+    private ApiSession browser;
+
+    /** The browser the writes come from: a visitor with a CSRF token (VOD 등록 needs no login yet). */
+    ApiSession browser() {
+        if (browser == null) browser = ApiSession.visitor(http);
+        return browser;
+    }
+
     /** Test setup only: start from an empty VOD table so page totals are predictable. */
     void noVods() {
         jdbc.update("DELETE FROM vod");
@@ -127,7 +136,7 @@ class VodApiTest {
         });
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-        return http.exchange("/api/vods", HttpMethod.POST, new HttpEntity<>(form, headers),
+        return browser().exchange("/api/vods", HttpMethod.POST, new HttpEntity<>(form, headers),
                 new ParameterizedTypeReference<>() {});
     }
 
@@ -399,7 +408,7 @@ class VodApiTest {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
-        ResponseEntity<Map<String, Object>> response = http.exchange("/api/vods", HttpMethod.POST,
+        ResponseEntity<Map<String, Object>> response = browser().exchange("/api/vods", HttpMethod.POST,
                 new HttpEntity<>(form, headers), new ParameterizedTypeReference<>() {});
 
         assertProblem(response, HttpStatus.PAYLOAD_TOO_LARGE);
@@ -470,7 +479,11 @@ class VodApiTest {
 
         try (Socket socket = new Socket("localhost", port)) {
             OutputStream out = socket.getOutputStream();
-            out.write(("POST /api/vods HTTP/1.1" + CRLF + "Host: localhost" + CRLF
+            HttpHeaders browserHeaders = browser().headers(); // session and CSRF, so the upload is really read
+            StringBuilder auth = new StringBuilder();
+            browserHeaders.forEach((name, values) -> values.forEach(v -> auth.append(name).append(": ").append(v)
+                    .append(CRLF)));
+            out.write(("POST /api/vods HTTP/1.1" + CRLF + "Host: localhost" + CRLF + auth
                     + "Content-Type: multipart/form-data; boundary=" + boundary + CRLF
                     + "Content-Length: " + (partialBody.length + 10_000) + CRLF + CRLF)
                     .getBytes(StandardCharsets.US_ASCII));
