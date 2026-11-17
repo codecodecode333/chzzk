@@ -34,8 +34,9 @@ interface BroadcastRepository extends JpaRepository<Broadcast, Long> {
 
     /*
      * The 방송's 후원 orders, read straight from the {@code donation} table so the broadcast module doesn't depend on the
-     * donations module. That couples it to the table and to its two final statuses only: CONFIRMED (a 후원) and FAILED
-     * (never one). Every other status is an order whose payment may still be approved (see DonationStatus).
+     * donations module. That couples it to the table: {@code status = 'CONFIRMED'} is a 후원, {@code 'FAILED'} never
+     * becomes one, and {@code is_open} (a column the database generates from the status) marks an order whose payment
+     * may still be approved.
      */
 
     /** Whether the 방송 has received 후원 (a CONFIRMED order). */
@@ -43,10 +44,9 @@ interface BroadcastRepository extends JpaRepository<Broadcast, Long> {
             nativeQuery = true)
     boolean hasConfirmedDonations(long id);
 
-    /** Whether the 방송 has an order that is neither CONFIRMED nor FAILED: its payment may still be approved. */
-    @Query(value = "select exists (select 1 from donation where broadcast_id = :id"
-            + " and status not in ('CONFIRMED', 'FAILED'))", nativeQuery = true)
-    boolean hasUnsettledDonations(long id);
+    /** Whether the 방송 has an open order (PENDING or EXPIRED): its payment may still be approved. */
+    @Query(value = "select exists (select 1 from donation where broadcast_id = :id and is_open)", nativeQuery = true)
+    boolean hasOpenDonations(long id);
 
     /**
      * Removes the 방송's FAILED orders (final, never 후원), which would otherwise hold the {@code ON DELETE RESTRICT}

@@ -309,7 +309,7 @@ describe('/donations/success', () => {
     server.use(
       http.post('/api/donations/confirm', () =>
         HttpResponse.json(
-          { status: 400, detail: '결제 금액이 후원 금액과 다릅니다.', code: 'AMOUNT_MISMATCH' },
+          { status: 400, detail: '승인된 금액이 후원 금액과 다릅니다.', code: 'AMOUNT_MISMATCH' },
           { status: 400 },
         ),
       ),
@@ -318,7 +318,7 @@ describe('/donations/success', () => {
     renderAt(`/donations/success?${SUCCESS_QUERY}`)
 
     expect(await screen.findByRole('heading', { name: '후원하지 못했습니다' })).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('결제 금액이 후원 금액과 다릅니다.')
+    expect(screen.getByRole('alert')).toHaveTextContent('승인된 금액이 후원 금액과 다릅니다.')
     expect(screen.queryByText('후원 완료')).not.toBeInTheDocument()
   })
 

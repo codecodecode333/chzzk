@@ -204,7 +204,7 @@ public class BroadcastLifecycle {
 
     private void requireNoDonations(long id) {
         if (repository.hasConfirmedDonations(id)) throw new ConflictException(HAS_DONATIONS);
-        if (repository.hasUnsettledDonations(id)) throw new ConflictException(PAYMENT_IN_PROGRESS);
+        if (repository.hasOpenDonations(id)) throw new ConflictException(PAYMENT_IN_PROGRESS);
     }
 
     private static void requireOwner(Broadcast broadcast, MemberRef member) {

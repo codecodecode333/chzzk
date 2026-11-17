@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 interface DonationRepository extends JpaRepository<Donation, Long> {
 
     String STATUS = "com.chzzk.donation.domain.DonationStatus.";
-    String OPEN = "(" + STATUS + "PENDING, " + STATUS + "EXPIRED)";
 
     Optional<Donation> findByOrderId(UUID orderId);
 
@@ -35,7 +34,7 @@ interface DonationRepository extends JpaRepository<Donation, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "update donation set status = 'CONFIRMED', payment_key = :paymentKey, confirmed_at = :confirmedAt,"
             + " failure_code = null, confirmed_seq = nextval('donation_confirmed_seq')"
-            + " where order_id = :orderId and status in ('PENDING', 'EXPIRED')", nativeQuery = true)
+            + " where order_id = :orderId and is_open", nativeQuery = true)
     int markConfirmed(UUID orderId, String paymentKey, Instant confirmedAt);
 
     /** The advisory lock namespace (first key) of {@link #lockConfirmationsOf}: "don" in ASCII. */
@@ -54,7 +53,7 @@ interface DonationRepository extends JpaRepository<Donation, Long> {
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update Donation d set d.status = " + STATUS + "FAILED, d.failureCode = :failureCode"
-            + " where d.orderId = :orderId and d.status in " + OPEN)
+            + " where d.orderId = :orderId and d.open = true")
     int markFailed(UUID orderId, String failureCode);
 
     /** {@code PENDING → EXPIRED} for every order created before {@code cutoff}. */

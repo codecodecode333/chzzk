@@ -37,7 +37,7 @@ public class Donation {
     private long recipientId;
 
     @Column(nullable = false, updatable = false)
-    private int amount;
+    private long amount;
 
     @Column(length = 100, updatable = false)
     private String message;
@@ -58,13 +58,17 @@ public class Donation {
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
 
+    /** {@link DonationStatus#isOpen()} as the database computes it (a generated column), for queries. */
+    @Column(name = "is_open", insertable = false, updatable = false)
+    private boolean open;
+
     /** The 후원's place in confirmation order (from a database sequence, set when it is confirmed); null until then. */
     @Column(name = "confirmed_seq", insertable = false, updatable = false)
     private Long confirmedSeq;
 
     protected Donation() {}
 
-    Donation(UUID orderId, long broadcastId, long donorId, long recipientId, int amount, String message,
+    Donation(UUID orderId, long broadcastId, long donorId, long recipientId, long amount, String message,
              Instant createdAt) {
         this.orderId = orderId;
         this.broadcastId = broadcastId;
@@ -81,7 +85,7 @@ public class Donation {
     public long getBroadcastId() { return broadcastId; }
     public long getDonorId() { return donorId; }
     public long getRecipientId() { return recipientId; }
-    public int getAmount() { return amount; }
+    public long getAmount() { return amount; }
     public String getMessage() { return message; }
     public DonationStatus getStatus() { return status; }
     public String getPaymentKey() { return paymentKey; }

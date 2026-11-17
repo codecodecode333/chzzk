@@ -47,16 +47,17 @@ public class DonationService {
 
     private static final Logger log = LoggerFactory.getLogger(DonationService.class);
 
-    public static final int MIN_AMOUNT = 1_000;
-    public static final int MAX_AMOUNT = 1_000_000;
-    public static final int AMOUNT_STEP = 1_000;
+    public static final long MIN_AMOUNT = 1_000;
+    public static final long MAX_AMOUNT = 1_000_000;
+    public static final long AMOUNT_STEP = 1_000;
     public static final int MESSAGE_MAX_CHARS = 100;
     /** How long an order may stay PENDING (Toss's 결제창 is valid for 30 minutes). */
     public static final Duration EXPIRE_AFTER = Duration.ofMinutes(30);
 
     static final String AMOUNT_RULE = "후원 금액은 1,000원부터 1,000,000원까지 1,000원 단위로 입력해 주세요.";
     static final String FAILED_ORDER = "실패한 후원입니다. 다시 후원해 주세요.";
-    static final String AMOUNT_MISMATCH = "결제 금액이 후원 금액과 다릅니다.";
+    static final String REQUESTED_AMOUNT_MISMATCH = "요청한 금액이 후원 금액과 다릅니다.";
+    static final String APPROVED_AMOUNT_MISMATCH = "승인된 금액이 후원 금액과 다릅니다.";
     static final String NOT_YET_PAID = "결제가 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.";
     static final String ORDER_GONE = "후원 주문을 찾을 수 없습니다. 결제가 승인되었다면 문의해 주세요.";
     /** Toss's answer to confirming a payment it already approved. */
@@ -82,14 +83,14 @@ public class DonationService {
      * own 방송 {@code 403}, 종료 방송 {@code 409}, bad amount or message {@code 400}.
      */
     @Transactional
-    public DonationOrder start(long broadcastId, Integer amount, String message) {
+    public DonationOrder start(long broadcastId, Long amount, String message) {
         MemberRef donor = currentMember.require();
         DonationBroadcast broadcast = repository.findBroadcast(broadcastId)
                 .orElseThrow(() -> new DonationNotFoundException(broadcastId + "번 방송을 찾을 수 없습니다."));
         MemberRef recipient = broadcast.getOwner().toRef();
         if (recipient.id() == donor.id()) throw new ForbiddenException("내 방송에는 후원할 수 없습니다.");
         if (!broadcast.isLive()) throw new ConflictException("종료된 방송에는 후원할 수 없습니다.");
-        int validAmount = validAmount(amount);
+        long validAmount = validAmount(amount);
         String validMessage = validMessage(message);
 
         Donation order = repository.save(new Donation(UUID.randomUUID(), broadcastId, donor.id(), recipient.id(),
@@ -110,17 +111,13 @@ public class DonationService {
         if (paymentKey == null || paymentKey.isBlank()) {
             throw new InvalidDonationException("paymentKey", "결제 키가 없습니다.");
         }
-        if (amount == null) throw new InvalidDonationException("amount", "결제 금액이 없습니다.");
+        if (amount == null) throw new InvalidDonationException("amount", "후원 금액이 없습니다.");
+        long requested = amount;
         Donation order = ownOrder(caller, orderId, "내 후원만 확정할 수 있습니다.");
-        switch (order.getStatus()) {
-            case CONFIRMED -> {
-                return view(order);
-            }
-            case FAILED -> throw new ConflictException(FAILED_ORDER);
-            case PENDING, EXPIRED -> { }
-        }
-        if (amount != order.getAmount()) {
-            return failed(order, PaymentNotConfirmedException.AMOUNT_MISMATCH, AMOUNT_MISMATCH);
+        if (order.getStatus() == DonationStatus.CONFIRMED) return view(order);
+        if (!order.getStatus().isOpen()) throw new ConflictException(FAILED_ORDER);
+        if (requested != order.getAmount()) {
+            return failed(order, PaymentNotConfirmedException.AMOUNT_MISMATCH, REQUESTED_AMOUNT_MISMATCH);
         }
 
         String id = order.getOrderId().toString();
@@ -210,7 +207,7 @@ public class DonationService {
             return failed(order, "PAYMENT_" + payment.status().name(), "결제가 완료되지 않았습니다.");
         }
         if (payment.totalAmount() != order.getAmount()) {
-            return failed(order, PaymentNotConfirmedException.AMOUNT_MISMATCH, AMOUNT_MISMATCH);
+            return failed(order, PaymentNotConfirmedException.AMOUNT_MISMATCH, APPROVED_AMOUNT_MISMATCH);
         }
         if (!order.getOrderId().toString().equals(payment.orderId())) {
             return failed(order, PaymentNotConfirmedException.PAYMENT_MISMATCH, "결제 정보가 후원 주문과 다릅니다.");
@@ -221,9 +218,9 @@ public class DonationService {
             repository.lockConfirmationsOf(order.getBroadcastId());
             repository.markConfirmed(order.getOrderId(), payment.paymentKey(), confirmedAt.truncatedTo(ChronoUnit.MICROS));
         });
-        Donation now = reload(order, payment.paymentKey());
-        if (now.getStatus() != DonationStatus.CONFIRMED) throw new ConflictException(FAILED_ORDER);
-        return view(now);
+        Donation settled = reload(order, payment.paymentKey());
+        if (settled.getStatus() != DonationStatus.CONFIRMED) throw new ConflictException(FAILED_ORDER);
+        return view(settled);
     }
 
     /**
@@ -232,8 +229,8 @@ public class DonationService {
      */
     private DonationView failed(Donation order, String code, String message) {
         if (repository.markFailed(order.getOrderId(), truncate(code, 100)) == 0) {
-            Donation now = reload(order, null);
-            if (now.getStatus() == DonationStatus.CONFIRMED) return view(now);
+            Donation current = reload(order, null);
+            if (current.getStatus() == DonationStatus.CONFIRMED) return view(current);
         }
         log.info("후원 order {} not confirmed: {} {}", order.getOrderId(), code, message);
         throw new PaymentNotConfirmedException(code, message);
@@ -280,7 +277,7 @@ public class DonationService {
         }
     }
 
-    private static int validAmount(Integer amount) {
+    private static long validAmount(Long amount) {
         if (amount == null) throw new InvalidDonationException("amount", "후원 금액을 입력해 주세요.");
         if (amount < MIN_AMOUNT || amount > MAX_AMOUNT || amount % AMOUNT_STEP != 0) {
             throw new InvalidDonationException("amount", AMOUNT_RULE);
@@ -302,7 +299,7 @@ public class DonationService {
      * A client-supplied value as it may appear in a log line: control characters (CR/LF could forge extra lines)
      * replaced by {@code ?}, and at most {@value #LOGGED_MAX_CHARS} characters.
      */
-    static String loggable(String s) {
+    private static String loggable(String s) {
         if (s == null) return null;
         String clean = s.replaceAll("\\p{Cntrl}", "?");
         return clean.length() <= LOGGED_MAX_CHARS ? clean : clean.substring(0, LOGGED_MAX_CHARS) + "...";

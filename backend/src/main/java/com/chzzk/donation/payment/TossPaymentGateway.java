@@ -41,6 +41,9 @@ class TossPaymentGateway implements PaymentGateway {
             // our key is wrong: a server misconfiguration, not the buyer's fault
             "UNAUTHORIZED_KEY", "INVALID_API_KEY");
 
+    private static final String NO_ANSWER = "결제사 응답을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+    private static final String UNREACHABLE = "결제사에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+
     private final RestClient api;
     private final ObjectMapper json;
 
@@ -74,12 +77,12 @@ class TossPaymentGateway implements PaymentGateway {
             TossError error = errorOf(e);
             if (e.getStatusCode().is5xxServerError() || RETRYABLE_CODES.contains(error.code())) {
                 log.warn("Toss confirm for order {} not settled: {} {}", orderId, error.code(), error.message());
-                throw new PaymentUnavailableException("결제사 응답을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", e);
+                throw new PaymentUnavailableException(NO_ANSWER, e);
             }
             throw new PaymentRejectedException(error.code(), error.message());
         } catch (RestClientException e) {
             log.warn("Toss confirm for order {} failed: {}", orderId, e.toString());
-            throw new PaymentUnavailableException("결제사에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.", e);
+            throw new PaymentUnavailableException(UNREACHABLE, e);
         }
     }
 
@@ -100,9 +103,9 @@ class TossPaymentGateway implements PaymentGateway {
             if (e.getStatusCode() == HttpStatus.NOT_FOUND) return Optional.empty();
             TossError error = errorOf(e);
             log.warn("Toss lookup {} failed: {} {}", variable, error.code(), error.message());
-            throw new PaymentUnavailableException("결제사 응답을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", e);
+            throw new PaymentUnavailableException(NO_ANSWER, e);
         } catch (RestClientException e) {
-            throw new PaymentUnavailableException("결제사에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.", e);
+            throw new PaymentUnavailableException(UNREACHABLE, e);
         }
     }
 

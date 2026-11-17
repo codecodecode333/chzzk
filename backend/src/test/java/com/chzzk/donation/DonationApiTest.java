@@ -257,7 +257,7 @@ class DonationApiTest {
 
         assertThat(tampered.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(tampered.getBody())
-                .containsEntry("detail", "결제 금액이 후원 금액과 다릅니다.")
+                .containsEntry("detail", "요청한 금액이 후원 금액과 다릅니다.")
                 .containsEntry("code", "AMOUNT_MISMATCH");
         assertThat(payments.confirms()).isEmpty();
         assertFailed(donor, order);

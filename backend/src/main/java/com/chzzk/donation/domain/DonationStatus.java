@@ -9,5 +9,13 @@ public enum DonationStatus {
     PENDING,
     CONFIRMED,
     FAILED,
-    EXPIRED
+    EXPIRED;
+
+    /**
+     * Whether the order is still open: not final, so its payment may yet be approved and confirm it. The single rule
+     * for Java; SQL reads the {@code donation.is_open} column, generated from the same rule (V9 migration).
+     */
+    public boolean isOpen() {
+        return this == PENDING || this == EXPIRED;
+    }
 }
