@@ -22,6 +22,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -45,6 +46,9 @@ class DonationApiTest {
 
     @Autowired
     FakePaymentGateway payments;
+
+    @Autowired
+    JdbcTemplate jdbc;
 
     @BeforeEach
     void resetPayments() {
@@ -281,11 +285,74 @@ class DonationApiTest {
                 .isEqualTo(HttpStatus.BAD_REQUEST);
         assertFailed(donor, otherOrder);
 
-        Map<String, Object> notDone = order(donor, id, 1_000);
-        payments.nextConfirm(r -> r.withStatus(PaymentStatus.ABORTED));
-        assertThat(confirm(donor, approval(notDone, "tgen_aborted", 1_000)).getStatusCode())
-                .isEqualTo(HttpStatus.BAD_REQUEST);
-        assertFailed(donor, notDone);
+        // definitively not paid
+        for (PaymentStatus status : List.of(PaymentStatus.ABORTED, PaymentStatus.EXPIRED, PaymentStatus.CANCELED)) {
+            Map<String, Object> notDone = order(donor, id, 1_000);
+            payments.nextConfirm(r -> r.withStatus(status));
+            ResponseEntity<Map<String, Object>> confirmed = confirm(donor, approval(notDone, "tgen_" + status, 1_000));
+            assertThat(confirmed.getStatusCode()).as("%s", status).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(confirmed.getBody()).containsEntry("code", "PAYMENT_" + status);
+            assertFailed(donor, notDone);
+        }
+    }
+
+    @Test
+    void tossReportingAPaymentStillInFlightLeavesTheOrderOpenAndAnswers503() {
+        ApiSession donor = ApiSession.member(http);
+        long id = live().id();
+        for (PaymentStatus status : List.of(PaymentStatus.READY, PaymentStatus.IN_PROGRESS,
+                PaymentStatus.WAITING_FOR_DEPOSIT, PaymentStatus.UNKNOWN)) {
+            Map<String, Object> order = order(donor, id, 1_000);
+            payments.nextConfirm(r -> r.withStatus(status));
+
+            ResponseEntity<Map<String, Object>> notYet = confirm(donor, approval(order, "tgen_" + status, 1_000));
+
+            assertThat(notYet.getStatusCode()).as("%s: %s", status, notYet.getBody())
+                    .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+            // the order is still open: once Toss has it DONE, the retry confirms it
+            ResponseEntity<Map<String, Object>> retried = confirm(donor, approval(order, "tgen_" + status, 1_000));
+            assertThat(retried.getBody()).as("%s", status).containsEntry("status", "CONFIRMED");
+        }
+    }
+
+    @Test
+    void alreadyProcessedPaymentStillInProgressAtTossLeavesTheOrderOpen() {
+        Live b = live();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, b.id(), 5_000);
+        // a concurrent confirm is being approved: Toss shows the payment IN_PROGRESS for a moment
+        payments.holds("tgen_wip", (String) order.get("orderId"), 5_000, PaymentStatus.IN_PROGRESS);
+        payments.nextConfirm(FakePaymentGateway.rejects("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
+
+        ResponseEntity<Map<String, Object>> notYet = confirm(donor, approval(order, "tgen_wip", 5_000));
+
+        assertThat(notYet.getStatusCode()).as("%s", notYet.getBody()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        payments.approved("tgen_wip", (String) order.get("orderId"), 5_000);
+        payments.nextConfirm(FakePaymentGateway.rejects("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
+        assertThat(confirm(donor, approval(order, "tgen_wip", 5_000)).getBody()).containsEntry("status", "CONFIRMED");
+        assertThat(total(b.id())).isEqualTo(5_000);
+    }
+
+    @Test
+    void anOrderThatVanishesWhileTossApprovesItIsAProblemNotA500() throws Exception {
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, live().id(), 5_000);
+        FakePaymentGateway.Hold atToss = payments.holdNextConfirm();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<ResponseEntity<Map<String, Object>>> confirming =
+                    pool.submit(() -> confirm(donor, approval(order, "tgen_vanished", 5_000)));
+            atToss.awaitArrival();
+            // nothing in the app removes an open order any more; simulate it going anyway (e.g. by hand)
+            jdbc.update("delete from donation where order_id = ?::uuid", order.get("orderId"));
+            atToss.release();
+
+            ResponseEntity<Map<String, Object>> confirmed = confirming.get();
+            assertThat(confirmed.getStatusCode()).as("%s", confirmed.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(confirmed.getBody()).containsEntry("detail", "후원 주문을 찾을 수 없습니다. 결제가 승인되었다면 문의해 주세요.");
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

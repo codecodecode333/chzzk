@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
  * payments.nextConfirm(r -> { throw new PaymentUnavailableException("timeout"); });
  * payments.approved("tgen_x", orderId, 5_000);                   // Toss already has this payment approved
  * payments.race(2);                                                // the next 2 confirms meet at Toss at once
+ * Hold hold = payments.holdNextConfirm();                          // Toss approves the next confirm, answers on release
  * }</pre>
  */
 public class FakePaymentGateway implements PaymentGateway {
@@ -46,6 +47,9 @@ public class FakePaymentGateway implements PaymentGateway {
     private final Map<String, PaymentResult> byPaymentKey = new ConcurrentHashMap<>();
     private CountDownLatch race;
     private int racers;
+    /** Counted down by each refused racer's lookup; the approved racer answers once all have looked it up. */
+    private CountDownLatch refusedRacersLookedUp;
+    private Hold hold;
     private volatile boolean lookupsUnreachable;
 
     /** The answer to the next confirm call only; later calls fall back to approving. */
@@ -64,6 +68,8 @@ public class FakePaymentGateway implements PaymentGateway {
         byPaymentKey.clear();
         race = null;
         racers = 0;
+        refusedRacersLookedUp = null;
+        hold = null;
         lookupsUnreachable = false;
     }
 
@@ -86,13 +92,48 @@ public class FakePaymentGateway implements PaymentGateway {
     /**
      * The next {@code parties} confirms of one payment meet here: none is answered until all have arrived. Then, like
      * Toss confirming one payment twice, the first to arrive approves it and every later one is refused with
-     * {@code ALREADY_PROCESSED_PAYMENT}. The refusals are answered first and the approval a moment later, the worst
-     * order for the caller: a refused confirm is settled while the approved one is still on its way back.
+     * {@code ALREADY_PROCESSED_PAYMENT}. The refusals are answered first, and the approval only once every refused
+     * racer has looked the payment up, the worst order for the caller: a refused confirm is being settled while the
+     * approved one is still on its way back.
      */
     public synchronized FakePaymentGateway race(int parties) {
         race = new CountDownLatch(parties);
         racers = parties;
+        refusedRacersLookedUp = new CountDownLatch(parties - 1);
         return this;
+    }
+
+    /**
+     * Toss approves the next confirm as soon as it arrives (so lookups find it {@code DONE}) but holds its answer until
+     * {@link Hold#release()}: the moment a confirm is "at Toss", for racing it against something else.
+     */
+    public synchronized Hold holdNextConfirm() {
+        hold = new Hold();
+        return hold;
+    }
+
+    /** A confirm held at Toss: wait for it to arrive, then let its answer go. */
+    public static final class Hold {
+        private final CountDownLatch arrived = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+
+        /** Blocks until the held confirm has reached Toss (and Toss has approved it). */
+        public void awaitArrival() {
+            await(arrived, "the held confirm never arrived");
+        }
+
+        public void release() {
+            released.countDown();
+        }
+    }
+
+    private static void await(CountDownLatch latch, String timeoutMessage) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) throw new IllegalStateException(timeoutMessage);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     @Override
@@ -100,6 +141,7 @@ public class FakePaymentGateway implements PaymentGateway {
         ConfirmScript script;
         CountDownLatch meeting = null;
         boolean firstRacer = false;
+        Hold held;
         synchronized (this) {
             confirms.add(new ConfirmCall(paymentKey, orderId, amount, idempotencyKey));
             if (racers > 0) {
@@ -114,31 +156,43 @@ public class FakePaymentGateway implements PaymentGateway {
                 if (race.getCount() == 0) racers = 0;
             }
             script = scripts.isEmpty() || meeting != null ? r -> r : scripts.removeFirst();
+            held = hold;
+            hold = null;
         }
         PaymentResult approval = new PaymentResult(PaymentStatus.DONE, amount, orderId, paymentKey, APPROVED_AT);
         if (meeting != null) return race(meeting, firstRacer, approval);
+        if (held != null) {
+            byPaymentKey.put(paymentKey, approval);
+            held.arrived.countDown();
+            await(held.released, "the held confirm was never released");
+        }
         PaymentResult answer = script.answer(approval);
         byPaymentKey.put(paymentKey, answer);
         return answer;
     }
 
     private PaymentResult race(CountDownLatch meeting, boolean first, PaymentResult approval) {
-        try {
-            if (!meeting.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("the other racers never came");
-            if (!first) throw new PaymentRejectedException("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다.");
-            // approved at Toss on arrival (see confirm); only the answer is slow
-            Thread.sleep(500);
-            return approval;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
+        await(meeting, "the other racers never came");
+        if (!first) throw new PaymentRejectedException("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다.");
+        // approved at Toss on arrival (see confirm); the answer comes back only after the refused racers looked it up
+        CountDownLatch lookedUp;
+        synchronized (this) {
+            lookedUp = refusedRacersLookedUp;
         }
+        if (lookedUp != null) await(lookedUp, "the refused racers never looked the payment up");
+        return approval;
     }
 
     @Override
     public Optional<PaymentResult> lookup(String paymentKey) {
         if (lookupsUnreachable) throw new PaymentUnavailableException("결제사에 연결하지 못했습니다.");
-        return Optional.ofNullable(byPaymentKey.get(paymentKey));
+        Optional<PaymentResult> found = Optional.ofNullable(byPaymentKey.get(paymentKey));
+        CountDownLatch lookedUp;
+        synchronized (this) {
+            lookedUp = refusedRacersLookedUp;
+        }
+        if (lookedUp != null) lookedUp.countDown();
+        return found;
     }
 
     @Override

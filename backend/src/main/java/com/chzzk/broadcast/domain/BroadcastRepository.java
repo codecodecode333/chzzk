@@ -32,22 +32,29 @@ interface BroadcastRepository extends JpaRepository<Broadcast, Long> {
     @Query("update Broadcast b set b.publishKeyHash = :hash where b.id = :id and b.status = :live")
     int replacePublishKeyIfLive(long id, String hash, BroadcastStatus live);
 
-    /**
-     * Whether the 방송 has received 후원 (a CONFIRMED order). Read straight from the {@code donation} table so the
-     * broadcast module doesn't depend on the donations module; that couples it to the table and its status values.
+    /*
+     * The 방송's 후원 orders, read straight from the {@code donation} table so the broadcast module doesn't depend on the
+     * donations module. That couples it to the table and to its two final statuses only: CONFIRMED (a 후원) and FAILED
+     * (never one). Every other status is an order whose payment may still be approved (see DonationStatus).
      */
+
+    /** Whether the 방송 has received 후원 (a CONFIRMED order). */
     @Query(value = "select exists (select 1 from donation where broadcast_id = :id and status = 'CONFIRMED')",
             nativeQuery = true)
     boolean hasConfirmedDonations(long id);
 
+    /** Whether the 방송 has an order that is neither CONFIRMED nor FAILED: its payment may still be approved. */
+    @Query(value = "select exists (select 1 from donation where broadcast_id = :id"
+            + " and status not in ('CONFIRMED', 'FAILED'))", nativeQuery = true)
+    boolean hasUnsettledDonations(long id);
+
     /**
-     * Removes the 방송's orders that never became 후원 (PENDING, FAILED, EXPIRED), which would otherwise hold the
-     * {@code ON DELETE RESTRICT} FK. A row confirmed concurrently is skipped (PostgreSQL re-checks the condition
-     * after waiting for its lock) and keeps that FK, so the 방송 delete then fails instead.
+     * Removes the 방송's FAILED orders (final, never 후원), which would otherwise hold the {@code ON DELETE RESTRICT}
+     * FK. Nothing else is ever deleted with a 방송: an open order may still be paid.
      */
     @Modifying
-    @Query(value = "delete from donation where broadcast_id = :id and status <> 'CONFIRMED'", nativeQuery = true)
-    int deleteUnconfirmedDonations(long id);
+    @Query(value = "delete from donation where broadcast_id = :id and status = 'FAILED'", nativeQuery = true)
+    int deleteFailedDonations(long id);
 
     @Modifying
     @Query("update Broadcast b set b.lastPublishingAt = :at where b.id in :ids and b.status = :live")

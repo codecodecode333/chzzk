@@ -56,6 +56,8 @@ public class DonationService {
     static final String AMOUNT_RULE = "후원 금액은 1,000원부터 1,000,000원까지 1,000원 단위로 입력해 주세요.";
     static final String FAILED_ORDER = "실패한 후원입니다. 다시 후원해 주세요.";
     static final String AMOUNT_MISMATCH = "결제 금액이 후원 금액과 다릅니다.";
+    static final String NOT_YET_PAID = "결제가 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.";
+    static final String ORDER_GONE = "후원 주문을 찾을 수 없습니다. 결제가 승인되었다면 문의해 주세요.";
     /** Toss's answer to confirming a payment it already approved. */
     static final String ALREADY_PROCESSED_PAYMENT = "ALREADY_PROCESSED_PAYMENT";
 
@@ -167,7 +169,7 @@ public class DonationService {
         }
         try {
             settle(order.get(), payment);
-        } catch (PaymentNotConfirmedException | ConflictException e) {
+        } catch (PaymentNotConfirmedException | ConflictException | DonationNotFoundException e) {
             // Paid at the provider but not a valid 후원 (wrong amount, or the order had already failed): needs a person.
             log.warn("Payment {} is DONE but order {} was not confirmed: {}", payment.paymentKey(), payment.orderId(),
                     e.getMessage());
@@ -184,12 +186,18 @@ public class DonationService {
 
     /**
      * Applies the provider's report of a payment to the order: CONFIRMED only for {@code DONE} with exactly our amount
-     * and order id, FAILED otherwise. The single place an order becomes CONFIRMED, so every path (the success
+     * and order id; left as it is for a payment still in flight ({@link PaymentStatus#isInFlight()}: {@code 503}, try
+     * again later); FAILED for a definitive non-success or a mismatch. The single place an order becomes CONFIRMED, so every path (the success
      * redirect, and a webhook reconcile that looks the payment up) applies the same rules and the same conditional
      * transition. Of concurrent callers one wins; the others answer the state it left: the 후원 if CONFIRMED, else
      * {@code 409} or the verification failure.
      */
     private DonationView settle(Donation order, PaymentResult payment) {
+        if (payment.status().isInFlight()) {
+            log.info("후원 order {}: payment {} is {} at the provider, not settled yet", order.getOrderId(),
+                    payment.paymentKey(), payment.status());
+            throw new PaymentUnavailableException(NOT_YET_PAID);
+        }
         if (payment.status() != PaymentStatus.DONE) {
             return failed(order, "PAYMENT_" + payment.status().name(), "결제가 완료되지 않았습니다.");
         }
@@ -202,7 +210,7 @@ public class DonationService {
         Instant confirmedAt = payment.approvedAt() != null ? payment.approvedAt() : now();
         repository.markConfirmed(order.getOrderId(), payment.paymentKey(),
                 confirmedAt.truncatedTo(ChronoUnit.MICROS));
-        Donation now = reload(order);
+        Donation now = reload(order, payment.paymentKey());
         if (now.getStatus() != DonationStatus.CONFIRMED) throw new ConflictException(FAILED_ORDER);
         return view(now);
     }
@@ -213,7 +221,7 @@ public class DonationService {
      */
     private DonationView failed(Donation order, String code, String message) {
         if (repository.markFailed(order.getOrderId(), truncate(code, 100)) == 0) {
-            Donation now = reload(order);
+            Donation now = reload(order, null);
             if (now.getStatus() == DonationStatus.CONFIRMED) return view(now);
         }
         log.info("후원 order {} not confirmed: {} {}", order.getOrderId(), code, message);
@@ -227,8 +235,17 @@ public class DonationService {
         return order;
     }
 
-    private Donation reload(Donation order) {
-        return repository.findByOrderId(order.getOrderId()).orElseThrow();
+    /**
+     * The order as it is now, after a conditional update changed nothing. Nothing in the app deletes an order that
+     * may still be paid, but should the row be gone anyway, that is a clear {@code 404} (and an error log naming the
+     * payment, which then needs a person), never a {@code 500}.
+     */
+    private Donation reload(Donation order, String paymentKey) {
+        return repository.findByOrderId(order.getOrderId()).orElseThrow(() -> {
+            log.error("후원 order {} disappeared while being settled (payment {}); check the payment by hand",
+                    order.getOrderId(), paymentKey);
+            return new DonationNotFoundException(ORDER_GONE);
+        });
     }
 
     private DonationView view(Donation order) {

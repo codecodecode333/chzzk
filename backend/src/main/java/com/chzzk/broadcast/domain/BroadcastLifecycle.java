@@ -54,6 +54,7 @@ public class BroadcastLifecycle {
     static final String NOT_LIVE = "이미 종료된 방송입니다.";
     static final String STILL_LIVE = "방송 중인 방송은 삭제할 수 없습니다. 방송을 먼저 종료하세요.";
     static final String HAS_DONATIONS = "후원 내역이 있는 방송은 삭제할 수 없습니다";
+    static final String PAYMENT_IN_PROGRESS = "결제가 진행 중인 후원이 있어 지금은 삭제할 수 없습니다";
 
     BroadcastLifecycle(BroadcastRepository repository, Clock clock, MediaServerGateway mediaServer,
                        TransactionTemplate transaction, CurrentMember currentMember, BroadcastOwnerRepository owners) {
@@ -176,9 +177,10 @@ public class BroadcastLifecycle {
      * with a {@link ConflictException} until it ends; 종료 is final, so the check can't go stale before the delete.
      *
      * <p>Payment records must not disappear: a 방송 with any confirmed 후원 is refused with a {@link ConflictException}
-     * ({@link #HAS_DONATIONS}). Orders that never became 후원 (PENDING, FAILED, EXPIRED) are deleted with the 방송 in the
-     * same transaction. A 후원 confirmed meanwhile is caught by the {@code donation} FK ({@code ON DELETE RESTRICT}),
-     * which rolls everything back and gives the same 409.
+     * ({@link #HAS_DONATIONS}), and so is one with an order whose payment may still be approved, PENDING or EXPIRED
+     * ({@link #PAYMENT_IN_PROGRESS}): deleting it could lose a payment Toss approves a moment later. Only FAILED orders
+     * are deleted with the 방송, in the same transaction. An order created or confirmed meanwhile is caught by the
+     * {@code donation} FK ({@code ON DELETE RESTRICT}), which rolls everything back and gives the matching 409.
      *
      * @return {@code false} for an unknown 방송
      */
@@ -188,15 +190,21 @@ public class BroadcastLifecycle {
             return transaction.execute(tx -> repository.findById(id).map(b -> {
                 requireOwner(b, member);
                 if (b.isLive()) throw new ConflictException(STILL_LIVE);
-                if (repository.hasConfirmedDonations(id)) throw new ConflictException(HAS_DONATIONS);
-                repository.deleteUnconfirmedDonations(id);
+                requireNoDonations(id);
+                repository.deleteFailedDonations(id);
                 repository.delete(b);
                 repository.flush();
                 return true;
             }).orElse(false));
-        } catch (DataIntegrityViolationException confirmedMeanwhile) {
-            throw new ConflictException(HAS_DONATIONS);
+        } catch (DataIntegrityViolationException orderedOrConfirmedMeanwhile) {
+            transaction.executeWithoutResult(tx -> requireNoDonations(id));
+            throw new ConflictException(PAYMENT_IN_PROGRESS);
         }
+    }
+
+    private void requireNoDonations(long id) {
+        if (repository.hasConfirmedDonations(id)) throw new ConflictException(HAS_DONATIONS);
+        if (repository.hasUnsettledDonations(id)) throw new ConflictException(PAYMENT_IN_PROGRESS);
     }
 
     private static void requireOwner(Broadcast broadcast, MemberRef member) {
