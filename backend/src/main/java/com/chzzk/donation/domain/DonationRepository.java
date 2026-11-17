@@ -1,8 +1,10 @@
 package com.chzzk.donation.domain;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -39,4 +41,20 @@ interface DonationRepository extends JpaRepository<Donation, Long> {
     @Query("update Donation d set d.status = " + STATUS + "FAILED, d.failureCode = :failureCode"
             + " where d.orderId = :orderId and d.status in " + OPEN)
     int markFailed(UUID orderId, String failureCode);
+
+    // ---- 내역 and 합계 (CONFIRMED only) ----
+
+    String ENTRY = "select new com.chzzk.donation.domain.DonationEntry(d.id, m.id, m.nickname, d.amount, d.message,"
+            + " d.confirmedAt) from Donation d join DonationMember m on m.id = d.donorId"
+            + " where d.broadcastId = :broadcastId and d.status = " + STATUS + "CONFIRMED ";
+
+    @Query(ENTRY + "and d.id < :before order by d.id desc")
+    List<DonationEntry> findConfirmed(long broadcastId, long before, Limit limit);
+
+    @Query(ENTRY + "and d.id > :after order by d.id asc")
+    List<DonationEntry> findConfirmedAfter(long broadcastId, long after, Limit limit);
+
+    @Query("select coalesce(sum(d.amount), 0) from Donation d"
+            + " where d.broadcastId = :broadcastId and d.status = " + STATUS + "CONFIRMED")
+    long totalConfirmed(long broadcastId);
 }

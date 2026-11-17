@@ -1,25 +1,33 @@
 package com.chzzk.donation.web;
 
 import com.chzzk.common.auth.MemberRef;
+import com.chzzk.common.web.Paging;
+import com.chzzk.donation.domain.DonationEntry;
+import com.chzzk.donation.domain.DonationHistory;
+import com.chzzk.donation.domain.DonationHistoryPage;
 import com.chzzk.donation.domain.DonationOrder;
 import com.chzzk.donation.domain.DonationService;
 import com.chzzk.donation.domain.DonationStatus;
 import com.chzzk.donation.domain.DonationView;
 import java.text.NumberFormat;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 후원 API (ADR-0004). {@code POST /api/broadcasts/{id}/donations} creates the order and hands the browser what the
  * Toss 결제창 needs (the client key only; the secret key stays here); {@code POST /api/donations/confirm} and
  * {@code POST /api/donations/{orderId}/fail} are called by the success and fail pages Toss redirects to.
+ * {@code GET /api/broadcasts/{id}/donations} is the 방송's public 내역 and 합계, paged like 댓글.
  */
 @RestController
 class DonationController {
@@ -28,11 +36,26 @@ class DonationController {
     static final String FAIL_PATH = "/donations/fail";
 
     private final DonationService donations;
+    private final DonationHistory history;
     private final String clientKey;
 
-    DonationController(DonationService donations, @Value("${donation.toss.client-key}") String clientKey) {
+    DonationController(DonationService donations, DonationHistory history,
+                       @Value("${donation.toss.client-key}") String clientKey) {
         this.donations = donations;
+        this.history = history;
         this.clientKey = clientKey;
+    }
+
+    @GetMapping("/api/broadcasts/{broadcastId}/donations")
+    HistoryResponse list(@PathVariable long broadcastId, @RequestParam(required = false) Long before,
+                         @RequestParam(required = false) Long after,
+                         @RequestParam(defaultValue = "" + Paging.DEFAULT_PAGE_SIZE) int size) {
+        int pageSize = Paging.of(0, size).size();
+        DonationHistoryPage page = after != null // polling for newer 후원; before is then ignored
+                ? history.listAfter(broadcastId, after, pageSize)
+                : history.list(broadcastId, before, pageSize);
+        return new HistoryResponse(page.content().stream().map(EntryResponse::of).toList(), page.nextBefore(),
+                page.nextAfter(), page.total());
     }
 
     @PostMapping("/api/broadcasts/{broadcastId}/donations")
@@ -76,6 +99,14 @@ class DonationController {
         static DonationResponse of(DonationView v) {
             return new DonationResponse(v.id(), v.orderId().toString(), v.broadcastId(), v.amount(), v.message(),
                     v.status(), v.donor(), v.recipient(), v.confirmedAt());
+        }
+    }
+
+    record HistoryResponse(List<EntryResponse> content, Long nextBefore, Long nextAfter, long total) {}
+
+    record EntryResponse(long id, MemberRef donor, int amount, String message, Instant confirmedAt) {
+        static EntryResponse of(DonationEntry e) {
+            return new EntryResponse(e.id(), e.donor(), e.amount(), e.message(), e.confirmedAt());
         }
     }
 }

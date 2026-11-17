@@ -5,6 +5,7 @@ import { getBroadcast, type Broadcast } from '../api/broadcasts'
 import { BroadcastInfo } from '../broadcasts/BroadcastInfo'
 import { CommentSection } from '../comments/CommentSection'
 import { DonateButton } from '../donations/DonateButton'
+import { DonationPanel } from '../donations/DonationPanel'
 import { watch } from '../media/media'
 import { LoadError } from './LoadError'
 
@@ -13,6 +14,9 @@ const STATUS_POLL_MS = 5000
 
 /** How often the 댓글 section picks up new 댓글 while the 방송 is 방송 중. */
 const COMMENT_REFRESH_MS = 5000
+
+/** How often the 후원 panel picks up new 후원 and the 합계 while the 방송 is 방송 중. */
+const DONATION_REFRESH_MS = 5000
 
 /**
  * 시청 screen (`/broadcasts/:id`). While 방송 중 it polls the status every 5s, and right away when the WebRTC
@@ -86,6 +90,7 @@ export function BroadcastWatchPage() {
       )}
       <BroadcastInfo broadcast={broadcast} onUpdated={setBroadcast} />
       <DonateButton broadcast={broadcast} />
+      <DonationPanel broadcastId={broadcast.id} refreshEveryMs={live ? DONATION_REFRESH_MS : undefined} />
       <CommentSection
         target={{ kind: 'broadcast', id: broadcast.id }}
         refreshEveryMs={live ? COMMENT_REFRESH_MS : undefined}

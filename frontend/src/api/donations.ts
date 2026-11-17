@@ -72,3 +72,32 @@ export async function confirmDonation(approval: PaymentApproval): Promise<Donati
 export async function failDonation(orderId: string, code: string, message: string): Promise<void> {
   await client.post(`/donations/${encodeURIComponent(orderId)}/fail`, { code, message })
 }
+
+/** A confirmed 후원 as a 방송's 내역 shows it. */
+export interface DonationEntry {
+  id: number
+  donor: DonationMember
+  amount: number
+  message: string | null
+  confirmedAt: string
+}
+
+/** One page of a 방송's confirmed 후원 (newest first) with its 후원 합계; the cursors work like 댓글's. */
+export interface DonationHistoryPage {
+  content: DonationEntry[]
+  /** Pass as `before` for the next (older) page; `null` when there are no older 후원. */
+  nextBefore: number | null
+  /** Reading with `after`: pass as `after` for the next newer page; `null` once this page reaches the newest 후원. */
+  nextAfter: number | null
+  /** The 후원 합계: every confirmed 후원 of the 방송, not just this page. */
+  total: number
+}
+
+/** Older 후원 than `before`, or (polling) newer ones than `after`. */
+export type DonationCursor = { before: number } | { after: number }
+
+/** A 방송's confirmed 후원 and 합계; public. Rejects with 404 for an unknown 방송. */
+export async function listDonations(broadcastId: number, cursor?: DonationCursor): Promise<DonationHistoryPage> {
+  const { data } = await client.get<DonationHistoryPage>(`/broadcasts/${broadcastId}/donations`, { params: cursor })
+  return data
+}
