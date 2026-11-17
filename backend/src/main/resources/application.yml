@@ -60,6 +60,9 @@ broadcast:
     interval: 10s
 
 donation:
+  expiry:
+    # How often PENDING 후원 orders older than 30 minutes are moved to EXPIRED (DonationExpiryJob).
+    interval: 1m
   toss:
     # Toss Payments TEST mode only (ADR-0004): every payment is simulated and no money moves. The defaults are the
     # public 결제창 (API 개별 연동) keys from Toss's docs, which Toss now refuses (UNAUTHORIZED_KEY): set your own

@@ -140,6 +140,7 @@ client sends it by itself.
 | 후원 시작 (`POST /api/broadcasts/{id}/donations`, a PENDING 후원 order) | 로그인 회원 who is not the 소유자, while 방송 중 | `401`; `403` on your own 방송; `409` once 종료; `400` for the amount (1,000–1,000,000원 in 1,000원 steps) or a 메시지 over 100자; `404` for an unknown 방송 |
 | 후원 확정 (`POST /api/donations/confirm`, from the success page; the server confirms with Toss) | that order's 후원자 | `401` / `403`; `404` for an unknown order; `400` with Toss's `code` when rejected or the amount differs; `409` for a failed order; `503` when Toss can't be reached (the order stays PENDING) |
 | 후원 실패 (`POST /api/donations/{orderId}/fail`, from the fail page) | that order's 후원자 | `401` / `403`; `404` for an unknown order |
+| Toss payment webhook (`POST /internal/payments/webhook`, no session or CSRF) | anyone; the body is only a hint, re-checked by looking the payment up with Toss | always `200`, except `503` when Toss can't be reached |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
 
 시청, 목록 and 댓글 목록 need no login: a VOD or 방송 link shared with someone should just play, and reading the 댓글
@@ -196,15 +197,25 @@ None of this is needed for the tests: every backend test replaces Toss with the 
 `com.chzzk.donation.FakePaymentGateway` (`DonationTestConfig`), and frontend tests mock the API and the payments
 module, so no test ever calls Toss.
 
-**Webhooks.** This build doesn't need them: the success page asks the backend to confirm, and confirming twice is
-harmless. To receive Toss webhooks once an endpoint exists, Toss must reach your backend over the public internet
-(it refuses localhost and LAN URLs), and webhooks are registered per account, so again only with your own keys:
-1. Expose the backend with a tunnel, e.g. `ngrok http 8080` (or `cloudflared tunnel --url http://localhost:8080`),
-   and note the public `https://…` URL.
-2. In the 개발자센터, 웹훅 → 웹훅 등록: that URL plus the endpoint path, event `PAYMENT_STATUS_CHANGED`.
-3. Toss expects a `200` within 10s and retries otherwise; the event carries no signature, so treat it as a hint and
-   look the payment up with Toss before trusting it. The tunnel URL changes on each restart (free ngrok), so update
-   the registration when it does.
+**Webhooks.** A paid 후원 is confirmed even if the 후원자 never returns to the success page: Toss's
+`PAYMENT_STATUS_CHANGED` webhook goes to `POST /internal/payments/webhook`. How it's protected: the event has no
+signature, so the backend reads only `paymentKey`/`orderId` from it and **looks the payment up with Toss** (by
+`paymentKey`, else by `orderId`); the order settled is the one Toss names, under the same rules as the success page
+(`DONE`, our amount, our orderId), and amounts or statuses in the body are ignored. A forged webhook can therefore
+only make the backend ask Toss about a payment. Every event is answered `200` (unknown orders and other events are
+ignored), except `503` when Toss can't be reached for the lookup, so Toss retries. Repeated webhooks, and a webhook
+racing the success page, count once. The endpoint sits under `/internal`, which the Vite dev server doesn't proxy:
+Toss must reach the backend itself, over the public internet (it refuses localhost and LAN URLs), and webhooks are
+registered per account, so only with your own keys:
+1. Expose the backend (port 8080, not Vite's 5173) with a tunnel, e.g. `ngrok http 8080` (or
+   `cloudflared tunnel --url http://localhost:8080`), and note the public `https://…` URL.
+2. In the 개발자센터, 웹훅 → 웹훅 등록: `https://<tunnel>/internal/payments/webhook`, event `PAYMENT_STATUS_CHANGED`.
+3. The tunnel URL changes on each restart (free ngrok), so update the registration when it does. Without a webhook
+   everything still works through the success page.
+
+**Expiry.** Orders still PENDING 30 minutes after they were created (Toss's 결제창 is valid that long) become EXPIRED;
+a job checks every minute (`donation.expiry.interval`). EXPIRED orders never count, but if a later confirm or webhook
+shows Toss has the payment `DONE` for the order's amount, the order is still confirmed: the money was paid.
 
 ### Manual test-payment checklist
 

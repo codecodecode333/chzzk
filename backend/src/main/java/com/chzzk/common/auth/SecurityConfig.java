@@ -26,7 +26,8 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  *       through {@link CurrentMember}.</li>
  *   <li><b>CSRF:</b> {@code GET /api/auth/csrf} sets the readable {@code XSRF-TOKEN} cookie; every state-changing
  *       request must echo it as {@code X-XSRF-TOKEN}. Login and signup issue a fresh token. The MediaMTX callback is exempt: it is no browser, and is
- *       guarded by its shared secret (see {@code broadcast.web.MediaServerAuthController}).</li>
+ *       guarded by its shared secret (see {@code broadcast.web.MediaServerAuthController}). So is Toss's payment
+ *       webhook, whose body is never trusted (see {@code donation.web.PaymentWebhookController}).</li>
  *   <li><b>Access:</b> every URL is reachable here; login is enforced where the data is, by domain services calling
  *       {@link CurrentMember#require()} (401), and ownership/authorship the same way ({@code ForbiddenException},
  *       403). Add URL rules below only for whole areas that need login.</li>
@@ -36,6 +37,8 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 class SecurityConfig {
 
     static final String MEDIA_SERVER_CALLBACK = "/internal/mediamtx/auth";
+    /** Toss's payment webhook: no browser either; its body is only a hint the 후원 module re-checks with Toss. */
+    static final String PAYMENT_WEBHOOK = "/internal/payments/webhook";
 
     @Bean
     SecurityFilterChain apiSecurity(HttpSecurity http,
@@ -51,7 +54,7 @@ class SecurityConfig {
                         // The token as the cookie holds it (no BREACH masking): it never appears in a response body
                         // other than GET /api/auth/csrf, and the SPA echoes the cookie value as is.
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .ignoringRequestMatchers(MEDIA_SERVER_CALLBACK))
+                        .ignoringRequestMatchers(MEDIA_SERVER_CALLBACK, PAYMENT_WEBHOOK))
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .logout(logout -> logout
                         .logoutUrl("/api/auth/logout") // POST only, CSRF-protected; invalidates the session

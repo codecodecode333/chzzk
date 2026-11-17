@@ -11,6 +11,7 @@ import com.chzzk.donation.payment.PaymentResult;
 import com.chzzk.donation.payment.PaymentStatus;
 import com.chzzk.donation.payment.PaymentUnavailableException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
@@ -49,6 +50,8 @@ public class DonationService {
     public static final int MAX_AMOUNT = 1_000_000;
     public static final int AMOUNT_STEP = 1_000;
     public static final int MESSAGE_MAX_CHARS = 100;
+    /** How long an order may stay PENDING (Toss's 결제창 is valid for 30 minutes). */
+    public static final Duration EXPIRE_AFTER = Duration.ofMinutes(30);
 
     static final String AMOUNT_RULE = "후원 금액은 1,000원부터 1,000,000원까지 1,000원 단위로 입력해 주세요.";
     static final String FAILED_ORDER = "실패한 후원입니다. 다시 후원해 주세요.";
@@ -139,6 +142,47 @@ public class DonationService {
     }
 
     /**
+     * Toss says a payment's status changed (the webhook). What it claims is never trusted: the payment is looked up
+     * with the provider (by {@code paymentKey}, else by {@code orderId}), and the order is the one the lookup names.
+     * Only a {@code DONE} payment for one of our orders is applied, through {@link #settle} like the success redirect,
+     * so it counts once however often it arrives; anything else (unknown to the provider, not ours, not {@code DONE})
+     * changes nothing. An unreachable provider throws {@link PaymentUnavailableException}, so the webhook is retried.
+     */
+    public void reconcile(String paymentKey, String orderId) {
+        Optional<PaymentResult> found = present(paymentKey).flatMap(gateway::lookup)
+                .or(() -> present(orderId).flatMap(gateway::lookupByOrderId));
+        if (found.isEmpty()) {
+            log.info("Payment webhook ignored: the provider knows no payment {} / order {}", paymentKey, orderId);
+            return;
+        }
+        PaymentResult payment = found.get();
+        Optional<Donation> order = parse(payment.orderId()).flatMap(repository::findByOrderId);
+        if (order.isEmpty()) {
+            log.info("Payment webhook ignored: payment {} is for no 후원 order of ours", payment.paymentKey());
+            return;
+        }
+        if (payment.status() != PaymentStatus.DONE) {
+            log.info("Payment webhook for order {}: {} (nothing to confirm)", payment.orderId(), payment.status());
+            return;
+        }
+        try {
+            settle(order.get(), payment);
+        } catch (PaymentNotConfirmedException | ConflictException e) {
+            // Paid at the provider but not a valid 후원 (wrong amount, or the order had already failed): needs a person.
+            log.warn("Payment {} is DONE but order {} was not confirmed: {}", payment.paymentKey(), payment.orderId(),
+                    e.getMessage());
+        }
+    }
+
+    /**
+     * The expiry sweep: orders PENDING for more than {@link #EXPIRE_AFTER} become EXPIRED. They never count, but a
+     * later confirm or webhook showing the payment {@code DONE} still confirms them. Returns how many expired.
+     */
+    public int expireStalePending() {
+        return repository.markExpired(now().minus(EXPIRE_AFTER));
+    }
+
+    /**
      * Applies the provider's report of a payment to the order: CONFIRMED only for {@code DONE} with exactly our amount
      * and order id, FAILED otherwise. The single place an order becomes CONFIRMED, so every path (the success
      * redirect, and a webhook reconcile that looks the payment up) applies the same rules and the same conditional
@@ -193,6 +237,10 @@ public class DonationService {
 
     private MemberRef member(long id) {
         return repository.findMember(id).orElseThrow().toRef();
+    }
+
+    private static Optional<String> present(String s) {
+        return s == null || s.isBlank() ? Optional.empty() : Optional.of(s);
     }
 
     private static Optional<UUID> parse(String orderId) {

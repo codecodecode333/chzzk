@@ -46,6 +46,7 @@ public class FakePaymentGateway implements PaymentGateway {
     private final Map<String, PaymentResult> byPaymentKey = new ConcurrentHashMap<>();
     private CountDownLatch race;
     private int racers;
+    private volatile boolean lookupsUnreachable;
 
     /** The answer to the next confirm call only; later calls fall back to approving. */
     public synchronized FakePaymentGateway nextConfirm(ConfirmScript script) {
@@ -63,11 +64,23 @@ public class FakePaymentGateway implements PaymentGateway {
         byPaymentKey.clear();
         race = null;
         racers = 0;
+        lookupsUnreachable = false;
     }
 
     /** Toss already holds this payment as approved ({@code DONE}), so lookups find it. */
     public void approved(String paymentKey, String orderId, long amount) {
         byPaymentKey.put(paymentKey, new PaymentResult(PaymentStatus.DONE, amount, orderId, paymentKey, APPROVED_AT));
+    }
+
+    /** Toss holds this payment in the given status (e.g. {@code IN_PROGRESS}: authenticated, not approved). */
+    public void holds(String paymentKey, String orderId, long amount, PaymentStatus status) {
+        byPaymentKey.put(paymentKey, new PaymentResult(status, amount, orderId, paymentKey,
+                status == PaymentStatus.DONE ? APPROVED_AT : null));
+    }
+
+    /** While set, every lookup fails as if Toss can't be reached. */
+    public void lookupsUnreachable(boolean unreachable) {
+        lookupsUnreachable = unreachable;
     }
 
     /**
@@ -105,10 +118,11 @@ public class FakePaymentGateway implements PaymentGateway {
     }
 
     private PaymentResult race(CountDownLatch meeting, boolean first, PaymentResult approval) {
+        // The first to arrive is approved at Toss at once, so a refused racer's lookup finds it; only its answer is slow.
+        if (first) byPaymentKey.put(approval.paymentKey(), approval);
         try {
             if (!meeting.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("the other racers never came");
             if (!first) throw new PaymentRejectedException("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다.");
-            byPaymentKey.put(approval.paymentKey(), approval); // approved at Toss; only the answer is slow
             Thread.sleep(500);
             return approval;
         } catch (InterruptedException e) {
@@ -119,11 +133,13 @@ public class FakePaymentGateway implements PaymentGateway {
 
     @Override
     public Optional<PaymentResult> lookup(String paymentKey) {
+        if (lookupsUnreachable) throw new PaymentUnavailableException("결제사에 연결하지 못했습니다.");
         return Optional.ofNullable(byPaymentKey.get(paymentKey));
     }
 
     @Override
     public Optional<PaymentResult> lookupByOrderId(String orderId) {
+        if (lookupsUnreachable) throw new PaymentUnavailableException("결제사에 연결하지 못했습니다.");
         return byPaymentKey.values().stream().filter(p -> p.orderId().equals(orderId)).findFirst();
     }
 

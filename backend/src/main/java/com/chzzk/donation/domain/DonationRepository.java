@@ -39,4 +39,11 @@ interface DonationRepository extends JpaRepository<Donation, Long> {
     @Query("update Donation d set d.status = " + STATUS + "FAILED, d.failureCode = :failureCode"
             + " where d.orderId = :orderId and d.status in " + OPEN)
     int markFailed(UUID orderId, String failureCode);
+
+    /** {@code PENDING → EXPIRED} for every order created before {@code cutoff}. */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Donation d set d.status = " + STATUS + "EXPIRED"
+            + " where d.status = " + STATUS + "PENDING and d.createdAt < :cutoff")
+    int markExpired(Instant cutoff);
 }
