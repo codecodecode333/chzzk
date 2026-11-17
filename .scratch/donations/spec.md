@@ -56,7 +56,7 @@ Status: ready-for-agent
 31. As a 방송 소유자, I want deleting a 방송 that has confirmed 후원 refused with a clear message, so that payment records aren't lost.
 32. As a 운영자, I want the payment provider's secret key kept only on the server, never sent to the browser, so that it can't be abused.
 33. As a 운영자, I want only the 후원자 who created an order to confirm or fail it, so that others can't interfere with someone's payment.
-34. As a developer, I want to run the whole flow locally with the publicly documented Toss test keys and no signup, so that the feature can be demoed anywhere.
+34. As a developer, I want to run the whole flow locally in Toss test mode with my own free Toss developer-account test keys (`test_ck_…`/`test_sk_…`), so that the feature can be demoed without real money. (The public sample keys in Toss's docs no longer work: Toss refuses them with `UNAUTHORIZED_KEY`. Automated tests need no keys at all: they use a fake payment gateway.)
 35. As a developer, I want README instructions for receiving webhooks with my own Toss developer account and a tunnel, so that the webhook path can be exercised end to end.
 
 ## Implementation Decisions
@@ -142,7 +142,7 @@ Status: ready-for-agent
 - **시청 screen**: shows a 후원 panel above the comments with the 후원 합계 and the 내역 (newest first, "더 보기"). While LIVE it polls every 5s using the `after` cursor, which also refreshes the 합계.
 
 **Config/README**
-- `TOSS_CLIENT_KEY` and `TOSS_SECRET_KEY` in `.env`, defaulting to the public docs test keys, plus a clear "test mode only" note.
+- `TOSS_CLIENT_KEY` and `TOSS_SECRET_KEY` in `.env`, set to the developer's own Toss developer-account test keys (the defaults are the public docs sample keys, which Toss now refuses with `UNAUTHORIZED_KEY`), plus a clear "test mode only" note; the backend refuses to start with keys that aren't `test_` keys unless explicitly overridden.
 - Webhook setup with your own developer-center account and a tunnel.
 - The 공개 범위 table gains the 후원 rows.
 
@@ -166,14 +166,14 @@ Status: ready-for-agent
   - **Webhook**: forged payload amounts are ignored in favour of the lookup; an unknown order is ignored with `200`.
   - **Expiry**: PENDING becomes EXPIRED after 30 minutes on the advanced clock; a late webhook or confirm with DONE still confirms it.
   - **List**: public, CONFIRMED only, cursors, total.
-  - **Deletion**: deleting a 방송 with confirmed 후원 gives `409`, while one with only failed or expired orders deletes fine.
+  - **Deletion**: deleting a 방송 with confirmed 후원 gives `409`, and so does one with a PENDING or EXPIRED order (its payment may still be approved); one with only failed orders deletes fine.
 - **Seam 2: frontend page components** (prior art: the existing page tests with MSW and `loggedInAs`). The **payments module is mocked**.
   - **Button visibility**: as visitor, as 회원 and as 소유자, on LIVE and on ENDED.
   - **Modal**: validation and presets; submit creates the order and calls the payments module with the server's values.
   - **Success page**: shows "확인 중…", then "후원 완료" only after the confirm `200`, and the error state otherwise.
   - **Fail page**: calls the fail endpoint.
   - **Panel**: the 합계 and 내역, "더 보기", and LIVE polling picking up a new 후원 (fake timers).
-- **Manual (not automated)**: one real Toss **test-mode** payment through the actual payment window, using the public test keys, on the local HTTPS dev setup. Confirm that the 후원 appears and that refreshing the success page doesn't double it. This is recorded as a README checklist item. No real money moves.
+- **Manual (not automated)**: one real Toss **test-mode** payment through the actual payment window, using the developer's own test keys, on the local HTTPS dev setup. Confirm that the 후원 appears and that refreshing the success page doesn't double it. This is recorded as a README checklist item. No real money moves.
 
 ## Out of Scope
 
@@ -186,7 +186,7 @@ Status: ready-for-agent
 
 ## Further Notes
 
-- The public Toss test keys are shared by everyone. That's fine for a demo, but webhooks can't be registered with them, which is why the redirect-confirm path is primary and the webhook path is verified by API tests plus optional self-setup.
+- The public Toss sample test keys are dead (`UNAUTHORIZED_KEY`), so a real test-mode payment needs the developer's own free Toss developer account and its `test_ck_`/`test_sk_` keys; automated tests use a fake gateway and never call Toss. Webhooks are registered per account and need a public URL, which is why the redirect-confirm path is primary and the webhook path is verified by API tests plus optional self-setup.
 - Toss requires confirmation within 10 minutes of payment authentication. The 30-minute expiry only cleans up abandoned orders; reconciliation by lookup covers late completions.
 - Because the recipient is frozen at order time and a 방송's 소유자 never changes, the recipient is always the 방송 소유자, but storing it keeps the record self-contained.
 - This feature makes a 방송 with 후원 undeletable. The README access table and 방송 delete UI should mention it.

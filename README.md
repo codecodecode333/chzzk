@@ -133,13 +133,13 @@ client sends it by itself.
 | 이어서 송출 (`POST /api/broadcasts/{id}/publish-key`, a fresh 송출 키) | 소유자, while 방송 중 | `401` / `403`; `409` once 종료 |
 | 송출 (WHIP through MediaMTX) | whoever holds the 방송's current 송출 키, while 방송 중 | refused by the auth callback |
 | 방송 제목 수정 (`PATCH /api/broadcasts/{id}`) | 소유자, 방송 중 or 종료 | `401` / `403` |
-| 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글 and its 후원 orders that never became 후원) | 소유자, once 종료, and only without confirmed 후원 | `401` / `403`; `409` while 방송 중; `409` "후원 내역이 있는 방송은 삭제할 수 없습니다" once it has a confirmed 후원 |
+| 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글 and its FAILED 후원 orders) | 소유자, once 종료, and only without 후원 or orders that may still be paid | `401` / `403`; `409` while 방송 중; `409` "후원 내역이 있는 방송은 삭제할 수 없습니다" once it has a confirmed 후원; `409` "결제가 진행 중인 후원이 있어 지금은 삭제할 수 없습니다" while an order is PENDING or EXPIRED |
 | 댓글 목록 (`GET /api/vods/{id}/comments`, `/api/broadcasts/{id}/comments`; `?before=` for older, `?after=` for newer) | 누구나 | `404` for an unknown VOD or 방송 |
 | 댓글 쓰기 (`POST` to the same paths; on a 방송 중 or 종료 방송) | 로그인 회원 | `401`; `404` for an unknown VOD or 방송 |
 | 댓글 수정·삭제 (`PATCH`, `DELETE /api/comments/{id}`) | 작성자 | `401` / `403` |
-| 후원 내역·합계 (`GET /api/broadcasts/{id}/donations`, confirmed 후원 only, newest first; `?before=` for older, `?after=` for newer; `total` counts confirmed 후원 only) | 누구나, 방송 중 or 종료 | `404` for an unknown 방송 |
+| 후원 내역·합계 (`GET /api/broadcasts/{id}/donations`, confirmed 후원 only, newest confirmed first; each entry's `seq` is its place in confirmation order and the cursor: `?before=` for older, `?after=` for newer; `total` counts confirmed 후원 only) | 누구나, 방송 중 or 종료 | `404` for an unknown 방송 |
 | 후원 시작 (`POST /api/broadcasts/{id}/donations`, a PENDING 후원 order) | 로그인 회원 who is not the 소유자, while 방송 중 | `401`; `403` on your own 방송; `409` once 종료; `400` for the amount (1,000–1,000,000원 in 1,000원 steps) or a 메시지 over 100자; `404` for an unknown 방송 |
-| 후원 확정 (`POST /api/donations/confirm`, from the success page; the server confirms with Toss) | that order's 후원자 | `401` / `403`; `404` for an unknown order; `400` with Toss's `code` when rejected or the amount differs; `409` for a failed order; `503` when Toss can't be reached (the order stays PENDING) |
+| 후원 확정 (`POST /api/donations/confirm`, from the success page; the server confirms with Toss) | that order's 후원자 | `401` / `403`; `404` for an unknown order; `400` with Toss's `code` when rejected, not paid (`ABORTED`, `EXPIRED`, `CANCELED`, ...) or the amount differs; `409` for a failed order; `503` when Toss can't be reached or the payment is still in progress there (the order stays open; retry) |
 | 후원 실패 (`POST /api/donations/{orderId}/fail`, from the fail page) | that order's 후원자 | `401` / `403`; `404` for an unknown order |
 | Toss payment webhook (`POST /internal/payments/webhook`, no session or CSRF) | anyone; the body is only a hint, re-checked by looking the payment up with Toss | always `200`, except `503` when Toss can't be reached |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
@@ -154,9 +154,10 @@ working; the frontend client reads the cookie on every write, so it picks the ne
 While a 방송 is 방송 중, its 시청 page polls for new 댓글 every 5s (with `?after=`, page by page, so none is skipped).
 Polling brings new 댓글 only: other people's edits and deletions show after a reload.
 
-Only a CONFIRMED order is a 후원. Deleting a 종료 방송 removes its PENDING, FAILED and EXPIRED orders with it (they
-never became 후원; an approval arriving later for one finds no order); a 방송 with any confirmed 후원 stays, because
-payment records must not disappear (the `donation` FK is `ON DELETE RESTRICT` as a backstop).
+Only a CONFIRMED order is a 후원. Deleting a 종료 방송 removes its FAILED orders with it (final, never 후원). A 방송
+with any confirmed 후원 stays, because payment records must not disappear, and so does one with a PENDING or EXPIRED
+order, because Toss may still approve that payment (an EXPIRED order is confirmed if Toss later shows it paid): such a
+방송 can't be deleted. The `donation` FK is `ON DELETE RESTRICT` as a backstop.
 
 ### Running with login
 
@@ -194,6 +195,9 @@ and sample repo (the defaults in `application.yml`) are now refused by Toss with
    ```
    The secret key stays on the server; never commit it or put it in the frontend.
 
+**Test mode is enforced.** The backend refuses to start unless both keys start with `test_`. Only to use other keys
+on purpose, set `TOSS_ALLOW_NON_TEST_KEYS=true`; this project never handles real money.
+
 None of this is needed for the tests: every backend test replaces Toss with the scriptable fake
 `com.chzzk.donation.FakePaymentGateway` (`DonationTestConfig`), and frontend tests mock the API and the payments
 module, so no test ever calls Toss.
@@ -214,8 +218,13 @@ registered per account, so only with your own keys:
 3. The tunnel URL changes on each restart (free ngrok), so update the registration when it does. Without a webhook
    everything still works through the success page.
 
+The webhook stays unauthenticated by design (the lookup is the check), so what's left to abuse is cost: anyone can call
+it, and each call can make the backend do up to two Toss lookups. It can't change an order, and the values it carries
+are logged only at debug level and sanitized. In production, put rate limiting and an allow-list of Toss's webhook IP
+addresses in front of `/internal/payments/webhook`; neither is implemented here.
+
 **Expiry.** Orders still PENDING 30 minutes after they were created (Toss's 결제창 is valid that long) become EXPIRED;
-a job checks every minute (`donation.expiry.interval`). EXPIRED orders never count, but if a later confirm or webhook
+a job checks every minute (`donation.expiry.interval`; `donation.expiry.enabled=false` switches it off). EXPIRED orders never count, but if a later confirm or webhook
 shows Toss has the payment `DONE` for the order's amount, the order is still confirmed: the money was paid.
 
 ### Manual test-payment checklist
