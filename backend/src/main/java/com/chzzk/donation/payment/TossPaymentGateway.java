@@ -24,9 +24,8 @@ import org.springframework.web.client.RestClientResponseException;
 
 /**
  * {@link PaymentGateway} over the Toss Payments core API ({@code https://api.tosspayments.com/v1}), authenticated
- * with HTTP Basic: the secret key as user name and an empty password. The secret key comes from
- * {@code donation.toss.secret-key} ({@code TOSS_SECRET_KEY}, by default the public docs 결제창 test key) and stays on
- * the server. With a {@code test_} key every payment is simulated: no money moves.
+ * with HTTP Basic: the secret key ({@link TossKeys}, a {@code test_} key unless explicitly overridden) as user name and
+ * an empty password. With a {@code test_} key every payment is simulated: no money moves.
  *
  * <p>Confirm sends the {@code Idempotency-Key} header, so a retried confirm of one order returns Toss's first answer
  * instead of approving again.
@@ -46,13 +45,12 @@ class TossPaymentGateway implements PaymentGateway {
     private final ObjectMapper json;
 
     TossPaymentGateway(RestClient.Builder builder, ObjectMapper json,
-                       @Value("${donation.toss.api-url}") String apiUrl,
-                       @Value("${donation.toss.secret-key}") String secretKey) {
+                       @Value("${donation.toss.api-url}") String apiUrl, TossKeys keys) {
         // Toss advises a generous read timeout for confirm (card networks can be slow).
         JdkClientHttpRequestFactory requests = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
         requests.setReadTimeout(Duration.ofSeconds(60));
-        String credentials = Base64.getEncoder().encodeToString((secretKey + ":").getBytes(StandardCharsets.UTF_8));
+        String credentials = Base64.getEncoder().encodeToString((keys.secretKey() + ":").getBytes(StandardCharsets.UTF_8));
         this.api = builder.clone()
                 .baseUrl(apiUrl)
                 .requestFactory(requests)

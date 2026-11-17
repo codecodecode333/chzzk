@@ -32,7 +32,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * still confirms it); only FAILED orders, which never become 후원, are deleted with it.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"broadcast.publishing-monitor.enabled=false", "donation.toss.client-key=test_ck_for_tests"})
+        properties = {"broadcast.publishing-monitor.enabled=false", "donation.expiry.enabled=false",
+                "donation.toss.client-key=test_ck_for_tests"})
 @Testcontainers
 @Import({BroadcastTestConfig.class, DonationTestConfig.class})
 class DonatedBroadcastDeleteApiTest {

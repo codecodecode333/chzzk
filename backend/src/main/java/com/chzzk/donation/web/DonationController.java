@@ -9,11 +9,11 @@ import com.chzzk.donation.domain.DonationOrder;
 import com.chzzk.donation.domain.DonationService;
 import com.chzzk.donation.domain.DonationStatus;
 import com.chzzk.donation.domain.DonationView;
+import com.chzzk.donation.payment.TossKeys;
 import java.text.NumberFormat;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,11 +39,10 @@ class DonationController {
     private final DonationHistory history;
     private final String clientKey;
 
-    DonationController(DonationService donations, DonationHistory history,
-                       @Value("${donation.toss.client-key}") String clientKey) {
+    DonationController(DonationService donations, DonationHistory history, TossKeys keys) {
         this.donations = donations;
         this.history = history;
-        this.clientKey = clientKey;
+        this.clientKey = keys.clientKey();
     }
 
     @GetMapping("/api/broadcasts/{broadcastId}/donations")

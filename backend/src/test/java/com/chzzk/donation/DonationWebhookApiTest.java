@@ -31,7 +31,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * redirect. Toss is the scriptable {@link FakePaymentGateway}; the webhook is posted like Toss does, with no session.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"broadcast.publishing-monitor.enabled=false", "donation.toss.client-key=test_ck_for_tests"})
+        properties = {"broadcast.publishing-monitor.enabled=false", "donation.expiry.enabled=false",
+                "donation.toss.client-key=test_ck_for_tests"})
 @Testcontainers
 @Import({BroadcastTestConfig.class, DonationTestConfig.class})
 class DonationWebhookApiTest {

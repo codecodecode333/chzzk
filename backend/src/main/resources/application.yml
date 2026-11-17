@@ -61,13 +61,17 @@ broadcast:
 
 donation:
   expiry:
-    # How often PENDING 후원 orders older than 30 minutes are moved to EXPIRED (DonationExpiryJob).
+    # Moves PENDING 후원 orders older than 30 minutes to EXPIRED (DonationExpirySchedule runs DonationExpiryJob on its
+    # own thread, whatever the broadcast module's scheduling is set to).
+    enabled: true
     interval: 1m
   toss:
     # Toss Payments TEST mode only (ADR-0004): every payment is simulated and no money moves. The defaults are the
     # public 결제창 (API 개별 연동) keys from Toss's docs, which Toss now refuses (UNAUTHORIZED_KEY): set your own
     # test keys (test_ck_/test_sk_) from a free Toss developer account in .env (see README, 후원). Tests use a fake.
-    # The client key goes to the browser; the secret key never leaves the server.
+    # The client key goes to the browser; the secret key never leaves the server. The backend refuses to start with
+    # keys that don't start with test_ (TossKeys), unless allow-non-test-keys is explicitly true.
     client-key: ${TOSS_CLIENT_KEY:test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq}
     secret-key: ${TOSS_SECRET_KEY:test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R}
     api-url: ${TOSS_API_URL:https://api.tosspayments.com}
+    allow-non-test-keys: ${TOSS_ALLOW_NON_TEST_KEYS:false}

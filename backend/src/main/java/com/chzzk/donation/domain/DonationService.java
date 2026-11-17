@@ -143,7 +143,9 @@ public class DonationService {
         Donation order = ownOrder(caller, orderId, "내 후원만 취소할 수 있습니다.");
         String failureCode = code == null || code.isBlank() ? "PAYMENT_FAILED" : truncate(code.strip(), 100);
         if (repository.markFailed(order.getOrderId(), failureCode) == 1) {
-            log.info("후원 order {} failed by the payment window: {} {}", orderId, failureCode, message);
+            // code and message come from the client: logged only in a form that can't forge log lines
+            log.info("후원 order {} failed by the payment window: {} {}", order.getOrderId(), loggable(failureCode),
+                    loggable(message));
         }
     }
 
@@ -158,13 +160,15 @@ public class DonationService {
         Optional<PaymentResult> found = present(paymentKey).flatMap(gateway::lookup)
                 .or(() -> present(orderId).flatMap(gateway::lookupByOrderId));
         if (found.isEmpty()) {
-            log.info("Payment webhook ignored: the provider knows no payment {} / order {}", paymentKey, orderId);
+            // paymentKey and orderId are whatever the caller sent: debug only, and never raw
+            log.debug("Payment webhook ignored: the provider knows no payment {} / order {}", loggable(paymentKey),
+                    loggable(orderId));
             return;
         }
         PaymentResult payment = found.get();
         Optional<Donation> order = parse(payment.orderId()).flatMap(repository::findByOrderId);
         if (order.isEmpty()) {
-            log.info("Payment webhook ignored: payment {} is for no 후원 order of ours", payment.paymentKey());
+            log.debug("Payment webhook ignored: payment {} is for no 후원 order of ours", loggable(payment.paymentKey()));
             return;
         }
         if (payment.status() != PaymentStatus.DONE) {
@@ -293,6 +297,18 @@ public class DonationService {
         }
         return trimmed;
     }
+
+    /**
+     * A client-supplied value as it may appear in a log line: control characters (CR/LF could forge extra lines)
+     * replaced by {@code ?}, and at most {@value #LOGGED_MAX_CHARS} characters.
+     */
+    static String loggable(String s) {
+        if (s == null) return null;
+        String clean = s.replaceAll("\\p{Cntrl}", "?");
+        return clean.length() <= LOGGED_MAX_CHARS ? clean : clean.substring(0, LOGGED_MAX_CHARS) + "...";
+    }
+
+    private static final int LOGGED_MAX_CHARS = 200;
 
     private static String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max);

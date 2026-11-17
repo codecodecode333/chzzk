@@ -32,7 +32,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 후원 are seeded through the real order and confirm flow, with Toss replaced by the {@link FakePaymentGateway}.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"broadcast.publishing-monitor.enabled=false", "donation.toss.client-key=test_ck_for_tests"})
+        properties = {"broadcast.publishing-monitor.enabled=false", "donation.expiry.enabled=false",
+                "donation.toss.client-key=test_ck_for_tests"})
 @Testcontainers
 @Import({BroadcastTestConfig.class, DonationTestConfig.class})
 class DonationListApiTest {

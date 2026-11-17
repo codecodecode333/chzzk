@@ -14,6 +14,12 @@ import org.springframework.web.bind.annotation.RestController;
  * changes. Amounts and statuses in the body are ignored. Every event, including unknown orders and other event types,
  * is answered {@code 200} so Toss stops retrying; only Toss being unreachable for the lookup answers {@code 503}, so
  * Toss retries later. Under {@code /internal}, which the dev proxy doesn't forward: expose the backend itself to Toss.
+ *
+ * <p>Remaining abuse surface: anyone can call it, and each call can cost up to two Toss lookups (by
+ * {@code paymentKey}, then by {@code orderId}), so a flood of fake events spends our Toss API quota and server time
+ * (it can't change any order: only what Toss itself reports is applied). Caller-supplied values are logged at debug
+ * level only, and sanitized. In production, put rate limiting and an allow-list of Toss's webhook IP addresses in
+ * front of this path; neither is implemented here.
  */
 @RestController
 class PaymentWebhookController {
