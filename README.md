@@ -133,10 +133,13 @@ client sends it by itself.
 | 이어서 송출 (`POST /api/broadcasts/{id}/publish-key`, a fresh 송출 키) | 소유자, while 방송 중 | `401` / `403`; `409` once 종료 |
 | 송출 (WHIP through MediaMTX) | whoever holds the 방송's current 송출 키, while 방송 중 | refused by the auth callback |
 | 방송 제목 수정 (`PATCH /api/broadcasts/{id}`) | 소유자, 방송 중 or 종료 | `401` / `403` |
-| 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글) | 소유자, once 종료 | `401` / `403`; `409` while 방송 중 |
+| 방송 삭제 (`DELETE /api/broadcasts/{id}`, with its 댓글 and its 후원 orders that never became 후원) | 소유자, once 종료, and only without confirmed 후원 | `401` / `403`; `409` while 방송 중; `409` "후원 내역이 있는 방송은 삭제할 수 없습니다" once it has a confirmed 후원 |
 | 댓글 목록 (`GET /api/vods/{id}/comments`, `/api/broadcasts/{id}/comments`; `?before=` for older, `?after=` for newer) | 누구나 | `404` for an unknown VOD or 방송 |
 | 댓글 쓰기 (`POST` to the same paths; on a 방송 중 or 종료 방송) | 로그인 회원 | `401`; `404` for an unknown VOD or 방송 |
 | 댓글 수정·삭제 (`PATCH`, `DELETE /api/comments/{id}`) | 작성자 | `401` / `403` |
+| 후원 시작 (`POST /api/broadcasts/{id}/donations`, a PENDING 후원 order) | 로그인 회원 who is not the 소유자, while 방송 중 | `401`; `403` on your own 방송; `409` once 종료; `400` for the amount (1,000–1,000,000원 in 1,000원 steps) or a 메시지 over 100자; `404` for an unknown 방송 |
+| 후원 확정 (`POST /api/donations/confirm`, from the success page; the server confirms with Toss) | that order's 후원자 | `401` / `403`; `404` for an unknown order; `400` with Toss's `code` when rejected or the amount differs; `409` for a failed order; `503` when Toss can't be reached (the order stays PENDING) |
+| 후원 실패 (`POST /api/donations/{orderId}/fail`, from the fail page) | that order's 후원자 | `401` / `403`; `404` for an unknown order |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
 
 시청, 목록 and 댓글 목록 need no login: a VOD or 방송 link shared with someone should just play, and reading the 댓글
@@ -148,6 +151,10 @@ working; the frontend client reads the cookie on every write, so it picks the ne
 
 While a 방송 is 방송 중, its 시청 page polls for new 댓글 every 5s (with `?after=`, page by page, so none is skipped).
 Polling brings new 댓글 only: other people's edits and deletions show after a reload.
+
+Only a CONFIRMED order is a 후원. Deleting a 종료 방송 removes its PENDING, FAILED and EXPIRED orders with it (they
+never became 후원; an approval arriving later for one finds no order); a 방송 with any confirmed 후원 stays, because
+payment records must not disappear (the `donation` FK is `ON DELETE RESTRICT` as a backstop).
 
 ### Running with login
 
@@ -164,6 +171,53 @@ To reclaim the space:
 - later: keep only the files still referenced by a VOD (`docker compose exec postgres psql -U chzzk -d chzzk -c
   "SELECT storage_key FROM vod"`; each key is a path relative to the storage root) and delete the rest.
 방송 have no files to clean up.
+
+## 후원 (Toss Payments test mode)
+
+후원 payments run against Toss Payments in **test mode only** (ADR-0004): approvals are simulated and no money moves,
+even if a real card number is entered. The backend confirms every payment with Toss itself; the browser only opens
+Toss's 결제창 with the client key the order response hands it.
+
+**Keys.** Real test-mode payments need **your own** Toss test keys. The public 결제창 test keys printed in Toss's docs
+and sample repo (the defaults in `application.yml`) are now refused by Toss with `UNAUTHORIZED_KEY`, so with them the
+결제창 or the confirm fails. To get working keys:
+1. Sign up (free, email only) at the Toss Payments 개발자센터 (https://developers.tosspayments.com).
+2. Under API 키, copy the **API 개별 연동** test pair: client key `test_ck_…` and secret key `test_sk_…` (not the
+   `test_gck_…`/`test_gsk_…` 결제위젯 pair; the frontend uses the 결제창 SDK, and the server looks orders up by
+   `orderId`, which a `gsk` key can't).
+3. Put them in the repo-root `.env` (git-ignored; see `.env.example`) and restart `./gradlew bootRun`:
+   ```sh
+   TOSS_CLIENT_KEY=test_ck_...
+   TOSS_SECRET_KEY=test_sk_...
+   ```
+   The secret key stays on the server; never commit it or put it in the frontend.
+
+None of this is needed for the tests: every backend test replaces Toss with the scriptable fake
+`com.chzzk.donation.FakePaymentGateway` (`DonationTestConfig`), and frontend tests mock the API and the payments
+module, so no test ever calls Toss.
+
+**Webhooks.** This build doesn't need them: the success page asks the backend to confirm, and confirming twice is
+harmless. To receive Toss webhooks once an endpoint exists, Toss must reach your backend over the public internet
+(it refuses localhost and LAN URLs), and webhooks are registered per account, so again only with your own keys:
+1. Expose the backend with a tunnel, e.g. `ngrok http 8080` (or `cloudflared tunnel --url http://localhost:8080`),
+   and note the public `https://…` URL.
+2. In the 개발자센터, 웹훅 → 웹훅 등록: that URL plus the endpoint path, event `PAYMENT_STATUS_CHANGED`.
+3. Toss expects a `200` within 10s and retries otherwise; the event carries no signature, so treat it as a hint and
+   look the payment up with Toss before trusting it. The tunnel URL changes on each restart (free ngrok), so update
+   the registration when it does.
+
+### Manual test-payment checklist
+
+With your own test keys in `.env`, the stack running (Run locally), and two 회원 (two browsers, or one private window):
+- [ ] 회원 A starts a 방송 (`/broadcasts/new`); 회원 B opens its 시청 page and sees "후원하기" (A, on their own 방송, does not).
+- [ ] B picks 5,000원, adds a 메시지 and submits: Toss's test 결제창 opens for 5,000원 and the order name "후원 5,000원".
+- [ ] B pays with any card in the test 결제창: it returns to `/donations/success`, which shows "확인 중…" then
+      "후원 완료" with 5,000원. In the 개발자센터's 테스트 결제내역 the payment shows as 완료 (no money was taken).
+- [ ] Refresh the success page: it shows the same "후원 완료" again, and the 테스트 결제내역 still has exactly one
+      payment for that order (confirming again doesn't pay or count twice).
+- [ ] B starts another 후원 and closes or cancels the 결제창: it lands on `/donations/fail` ("후원하지 못했습니다") with the reason, and no
+      후원 is recorded.
+- [ ] A ends the 방송 and tries 삭제 on its 시청 page: it stays, showing "후원 내역이 있는 방송은 삭제할 수 없습니다".
 
 ## Tests
 

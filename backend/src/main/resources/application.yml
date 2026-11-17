@@ -62,7 +62,8 @@ broadcast:
 donation:
   toss:
     # Toss Payments TEST mode only (ADR-0004): every payment is simulated and no money moves. The defaults are the
-    # public 결제창 (API 개별 연동) keys from Toss's docs, shared by everyone; set your own test keys in .env.
+    # public 결제창 (API 개별 연동) keys from Toss's docs, which Toss now refuses (UNAUTHORIZED_KEY): set your own
+    # test keys (test_ck_/test_sk_) from a free Toss developer account in .env (see README, 후원). Tests use a fake.
     # The client key goes to the browser; the secret key never leaves the server.
     client-key: ${TOSS_CLIENT_KEY:test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq}
     secret-key: ${TOSS_SECRET_KEY:test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R}
