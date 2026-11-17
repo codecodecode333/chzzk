@@ -1,6 +1,6 @@
 # 후원: 방송 소유자에게 테스트 결제로 후원하기
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem Statement
 

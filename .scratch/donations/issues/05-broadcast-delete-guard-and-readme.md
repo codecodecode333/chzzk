@@ -10,11 +10,11 @@ The README explains:
 
 **Blocked by:** 01 (후원 주문과 서버 확정)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `DELETE /api/broadcasts/{id}` for a 방송 with any CONFIRMED 후원 → `409` Problem Details with the message above; the broadcast module does this without importing the donations module (a query port or the DB `RESTRICT` constraint mapped to `409`). With only non-confirmed orders, the delete succeeds and those orders are removed or handled consistently with the FK
-- [ ] The 시청 screen's 삭제 control shows the `409` message
-- [ ] README 공개 범위 table gains the 후원 rows, verified against the code and tests
-- [ ] README documents the Toss test-mode keys, env vars, the webhook-with-tunnel setup, and the manual test-payment checklist
-- [ ] HTTP API seam tests cover deleting a 방송 with a confirmed 후원 → `409`, and with only FAILED or EXPIRED orders → `204`
-- [ ] A frontend seam test covers the `409` message shown on delete
+- [x] `DELETE /api/broadcasts/{id}` for a 방송 with any CONFIRMED 후원 → `409` Problem Details with the message above; the broadcast module does this without importing the donations module (a query port or the DB `RESTRICT` constraint mapped to `409`). With only non-confirmed orders, the delete succeeds and those orders are removed or handled consistently with the FK
+- [x] The 시청 screen's 삭제 control shows the `409` message
+- [x] README 공개 범위 table gains the 후원 rows, verified against the code and tests
+- [x] README documents the Toss test-mode keys, env vars, the webhook-with-tunnel setup, and the manual test-payment checklist
+- [x] HTTP API seam tests cover deleting a 방송 with a confirmed 후원 → `409`, and with only FAILED or EXPIRED orders → `204`
+- [x] A frontend seam test covers the `409` message shown on delete

@@ -9,11 +9,11 @@ While the 방송 is live, new 후원 and the 합계 appear on their own every 5 
 
 **Blocked by:** 01 (후원 주문과 서버 확정)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `GET /api/broadcasts/{id}/donations?before=&after=&size=` is public and returns `{content:[{id, donor:{id,nickname}, amount, message, confirmedAt}], nextBefore, nextAfter, total}` with CONFIRMED only, ordered newest first; `size` defaults to 20 and is capped, the cursors behave like 댓글's, and an unknown 방송 → `404`
-- [ ] `total` sums CONFIRMED amounts only, so PENDING, FAILED and EXPIRED never count
-- [ ] The 시청 screen panel shows the 합계 and the 내역 with "더 보기". While LIVE it polls every 5s with the `after` cursor and refreshes the 합계, with no duplicates and without losing loaded pages; it stops when the 방송 ends
-- [ ] After a successful 후원, returning to the 방송 shows the new 후원 in the panel
-- [ ] HTTP API seam tests cover: public access, CONFIRMED-only filtering (seed PENDING, FAILED and CONFIRMED through the flow), ordering, both cursors, the total, and unknown 방송
-- [ ] Frontend seam tests cover: 합계 and 내역 rendering, "더 보기", LIVE polling picking up a new 후원 (fake timers), and ENDED not polling
+- [x] `GET /api/broadcasts/{id}/donations?before=&after=&size=` is public and returns `{content:[{id, donor:{id,nickname}, amount, message, confirmedAt}], nextBefore, nextAfter, total}` with CONFIRMED only, ordered newest first; `size` defaults to 20 and is capped, the cursors behave like 댓글's, and an unknown 방송 → `404`
+- [x] `total` sums CONFIRMED amounts only, so PENDING, FAILED and EXPIRED never count
+- [x] The 시청 screen panel shows the 합계 and the 내역 with "더 보기". While LIVE it polls every 5s with the `after` cursor and refreshes the 합계, with no duplicates and without losing loaded pages; it stops when the 방송 ends
+- [x] After a successful 후원, returning to the 방송 shows the new 후원 in the panel
+- [x] HTTP API seam tests cover: public access, CONFIRMED-only filtering (seed PENDING, FAILED and CONFIRMED through the flow), ordering, both cursors, the total, and unknown 방송
+- [x] Frontend seam tests cover: 합계 and 내역 rendering, "더 보기", LIVE polling picking up a new 후원 (fake timers), and ENDED not polling
