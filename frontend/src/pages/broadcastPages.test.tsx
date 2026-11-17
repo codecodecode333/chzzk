@@ -977,4 +977,21 @@ describe('시청 screen controls for the 소유자', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('방송을 먼저 종료하세요.')
     expect(screen.getByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
   })
+
+  it('stays on the 방송 and says why when it has 후원 and cannot be deleted', async () => {
+    const user = userEvent.setup()
+    loggedInAs(OWNER)
+    server.use(
+      http.get('/api/broadcasts/7', () => HttpResponse.json(ended)),
+      http.delete('/api/broadcasts/7', () => problem(409, '후원 내역이 있는 방송은 삭제할 수 없습니다')),
+    )
+    vi.stubGlobal('confirm', () => true)
+    renderAt('/broadcasts/7')
+
+    await user.click(await screen.findByRole('button', { name: '삭제' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('후원 내역이 있는 방송은 삭제할 수 없습니다')
+    expect(screen.getByRole('heading', { name: '저녁 산책' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '삭제' })).toBeEnabled()
+  })
 })
