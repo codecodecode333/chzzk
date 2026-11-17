@@ -10,6 +10,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +22,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -42,6 +46,9 @@ class DonationApiTest {
 
     @Autowired
     FakePaymentGateway payments;
+
+    @Autowired
+    JdbcTemplate jdbc;
 
     @BeforeEach
     void resetPayments() {
@@ -352,6 +359,142 @@ class DonationApiTest {
         assertThat(confirm(donor, Map.of("paymentKey", "tgen_x", "orderId", order.get("orderId"))).getStatusCode())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(payments.confirms()).isEmpty();
+    }
+
+    // ---- idempotency: one approval credits one 후원 ----
+
+    /**
+     * The 방송's 후원 합계 as the spec defines it: the sum of its CONFIRMED orders. Read straight from the table until
+     * the public 내역/합계 endpoint (ticket 02) is on this branch; then read that endpoint's {@code total} instead.
+     */
+    long total(long broadcastId) {
+        return jdbc.queryForObject("select coalesce(sum(amount), 0) from donation"
+                + " where broadcast_id = ? and status = 'CONFIRMED'", Long.class, broadcastId);
+    }
+
+    @Test
+    void confirmingTwiceReturnsTheSameDonationAndCountsItOnce() {
+        Live b = live();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, b.id(), 3_000);
+
+        ResponseEntity<Map<String, Object>> first = confirm(donor, approval(order, "tgen_twice", 3_000));
+        ResponseEntity<Map<String, Object>> again = confirm(donor, approval(order, "tgen_twice", 3_000));
+
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(again.getBody()).isEqualTo(first.getBody());
+        assertThat(payments.confirms()).hasSize(1); // the second confirm never reaches Toss
+        assertThat(total(b.id())).isEqualTo(3_000);
+    }
+
+    @Test
+    void twoConcurrentConfirmsConfirmOnceAndCountOnce() throws Exception {
+        Live b = live();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, b.id(), 7_000);
+        // Both requests reach Toss together. Like Toss, the fake approves one and answers ALREADY_PROCESSED_PAYMENT to
+        // the other, and answers that one first: the worst interleaving for our side.
+        payments.race(2);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<ResponseEntity<Map<String, Object>>>> results = pool.invokeAll(List.of(
+                    () -> confirm(donor, approval(order, "tgen_race", 7_000)),
+                    () -> confirm(donor, approval(order, "tgen_race", 7_000))));
+
+            for (Future<ResponseEntity<Map<String, Object>>> result : results) {
+                ResponseEntity<Map<String, Object>> confirmed = result.get();
+                assertThat(confirmed.getStatusCode()).as("%s", confirmed.getBody()).isEqualTo(HttpStatus.OK);
+                assertThat(confirmed.getBody())
+                        .containsEntry("status", "CONFIRMED")
+                        .containsEntry("orderId", order.get("orderId"));
+            }
+            assertThat(results.get(0).get().getBody().get("id")).isEqualTo(results.get(1).get().getBody().get("id"));
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(payments.confirms()).hasSize(2); // both really raced to Toss
+        assertThat(total(b.id())).isEqualTo(7_000);
+    }
+
+    @Test
+    void alreadyProcessedPaymentIsResolvedByLookingThePaymentUp() {
+        Live b = live();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, b.id(), 5_000);
+        // Toss already approved this payment (an earlier confirm whose answer never reached us) ...
+        payments.approved("tgen_done", (String) order.get("orderId"), 5_000);
+        payments.nextConfirm(FakePaymentGateway.rejects("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
+
+        ResponseEntity<Map<String, Object>> confirmed = confirm(donor, approval(order, "tgen_done", 5_000));
+
+        assertThat(confirmed.getStatusCode()).as("%s", confirmed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(confirmed.getBody())
+                .containsEntry("status", "CONFIRMED")
+                .containsEntry("amount", 5_000)
+                .containsEntry("confirmedAt", FakePaymentGateway.APPROVED_AT.toString());
+        assertThat(total(b.id())).isEqualTo(5_000);
+    }
+
+    @Test
+    void alreadyProcessedPaymentIsStillVerifiedAgainstTheOrder() {
+        Live b = live();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, b.id(), 5_000);
+        // the payment Toss has under this key was approved for another amount: never counted
+        payments.approved("tgen_cheap_done", (String) order.get("orderId"), 1_000);
+        payments.nextConfirm(FakePaymentGateway.rejects("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
+
+        ResponseEntity<Map<String, Object>> confirmed = confirm(donor, approval(order, "tgen_cheap_done", 5_000));
+
+        assertThat(confirmed.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(confirmed.getBody()).containsEntry("code", "AMOUNT_MISMATCH");
+        assertFailed(donor, order);
+        assertThat(total(b.id())).isZero();
+    }
+
+    @Test
+    void alreadyProcessedPaymentTossCannotFindLeavesTheOrderPending() {
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, live().id(), 1_000);
+        payments.nextConfirm(FakePaymentGateway.rejects("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
+
+        ResponseEntity<Map<String, Object>> confirmed = confirm(donor, approval(order, "tgen_unknown", 1_000));
+
+        assertThat(confirmed.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(confirm(donor, approval(order, "tgen_unknown", 1_000)).getBody()).containsEntry("status", "CONFIRMED");
+    }
+
+    @Test
+    void gatewayDownAnswers503ProblemAndTheRetryCountsOnce() {
+        Live b = live();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, b.id(), 2_000);
+        payments.nextConfirm(FakePaymentGateway.unreachable());
+
+        ResponseEntity<Map<String, Object>> down = confirm(donor, approval(order, "tgen_down", 2_000));
+
+        assertThat(down.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(down.getBody()).containsEntry("status", 503).containsKey("detail");
+        assertThat(total(b.id())).isZero();
+        assertThat(confirm(donor, approval(order, "tgen_down", 2_000)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(confirm(donor, approval(order, "tgen_down", 2_000)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(total(b.id())).isEqualTo(2_000);
+    }
+
+    @Test
+    void aFailedOrderStaysFailed() {
+        Live b = live();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> order = order(donor, b.id(), 1_000);
+        payments.nextConfirm(FakePaymentGateway.rejects("REJECT_CARD_PAYMENT", "한도초과"));
+        assertThat(confirm(donor, approval(order, "tgen_dead", 1_000)).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+
+        assertFailed(donor, order);
+        assertFailed(donor, order);
+        assertThat(total(b.id())).isZero();
     }
 
     // ---- fail ----
