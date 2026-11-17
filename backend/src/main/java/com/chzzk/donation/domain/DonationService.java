@@ -102,8 +102,9 @@ public class DonationService {
      * The 후원자 back from the payment window with Toss's {@code paymentKey}, {@code orderId} and {@code amount}.
      * A client amount other than the order's fails the order without asking the provider. Otherwise the provider
      * approves the order's own amount, and the order is CONFIRMED only if it reports {@code DONE} with that
-     * {@code totalAmount} and {@code orderId}; anything else (or a rejection) fails it ({@code 400}). An unreachable
-     * provider leaves it PENDING ({@code 503}). A CONFIRMED order is returned as it is; a FAILED one is {@code 409}.
+     * {@code totalAmount} and {@code orderId}; a payment the provider still has in flight leaves it open ({@code 503});
+     * anything else (or a rejection) fails it ({@code 400}). An unreachable provider leaves it open too
+     * ({@code 503}). A CONFIRMED order is returned as it is; a FAILED one is {@code 409}.
      * Repeating or racing a confirm never credits twice: see the class comment.
      */
     public DonationView confirm(String paymentKey, String orderId, Long amount) {
