@@ -92,6 +92,11 @@ public class FakePaymentGateway implements PaymentGateway {
             if (racers > 0) {
                 meeting = race;
                 firstRacer = race.getCount() == racers;
+                // Toss approves the first to arrive at once, before any later racer can be refused and look it up.
+                if (firstRacer) {
+                    byPaymentKey.put(paymentKey,
+                            new PaymentResult(PaymentStatus.DONE, amount, orderId, paymentKey, APPROVED_AT));
+                }
                 race.countDown();
                 if (race.getCount() == 0) racers = 0;
             }
@@ -108,7 +113,7 @@ public class FakePaymentGateway implements PaymentGateway {
         try {
             if (!meeting.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("the other racers never came");
             if (!first) throw new PaymentRejectedException("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다.");
-            byPaymentKey.put(approval.paymentKey(), approval); // approved at Toss; only the answer is slow
+            // approved at Toss on arrival (see confirm); only the answer is slow
             Thread.sleep(500);
             return approval;
         } catch (InterruptedException e) {
