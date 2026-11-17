@@ -28,14 +28,15 @@ const live = {
 }
 const ended = { ...live, status: 'ENDED', endedAt: '2026-11-15T10:42:00Z', whepUrl: null }
 
-function donation(id: number, amount: number, message: string | null) {
-  return { id, donor: DONOR, amount, message, confirmedAt: '2026-11-15T10:10:00Z' }
+/** A confirmed 후원; `seq` (its place in confirmation order) defaults to its id, as when orders are paid in order. */
+function donation(id: number, amount: number, message: string | null, seq = id) {
+  return { id, seq, donor: DONOR, amount, message, confirmedAt: '2026-11-15T10:10:00Z' }
 }
 type ApiDonation = ReturnType<typeof donation>
 
 /**
- * Serves 방송 7 (whatever `state.broadcast` is) and its confirmed 후원 from `state.donations` (newest first), paging
- * by `before` and `after` like the server, with the 합계 of all of them; counts the 후원 list requests.
+ * Serves 방송 7 (whatever `state.broadcast` is) and its confirmed 후원 from `state.donations` (newest confirmed first),
+ * paging by `before` and `after` on `seq` like the server, with the 합계 of all of them; counts the 후원 list requests.
  */
 function broadcastServer(broadcast: object, donations: ApiDonation[], pageSize = 20) {
   const state = { broadcast, donations, donationRequests: 0 }
@@ -47,15 +48,15 @@ function broadcastServer(broadcast: object, donations: ApiDonation[], pageSize =
       const params = new URL(request.url).searchParams
       const after = params.get('after')
       if (after !== null) {
-        const newer = state.donations.filter((d) => d.id > Number(after)).reverse() // oldest first
+        const newer = state.donations.filter((d) => d.seq > Number(after)).reverse() // oldest first
         const page = newer.slice(0, pageSize)
-        const nextAfter = newer.length > pageSize ? page[page.length - 1].id : null
+        const nextAfter = newer.length > pageSize ? page[page.length - 1].seq : null
         return HttpResponse.json({ content: page.reverse(), nextBefore: null, nextAfter, total })
       }
       const before = params.get('before')
-      const older = state.donations.filter((d) => before === null || d.id < Number(before))
+      const older = state.donations.filter((d) => before === null || d.seq < Number(before))
       const page = older.slice(0, pageSize)
-      const nextBefore = older.length > pageSize ? page[page.length - 1].id : null
+      const nextBefore = older.length > pageSize ? page[page.length - 1].seq : null
       return HttpResponse.json({ content: page, nextBefore, nextAfter: null, total })
     }),
   )
@@ -150,6 +151,24 @@ describe('후원 panel on the 시청 screen', () => {
     // a poll with nothing new changes nothing
     await act(() => vi.advanceTimersByTimeAsync(5000))
     expect(await shownDonations()).toHaveLength(5)
+  })
+
+  it('picks up a 후원 whose order is older but was confirmed later, on top', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mocked.watch.mockResolvedValue({ stream: new MediaStream(), stop: vi.fn() })
+    // order 50 was paid first (seq 2); order 3, made earlier, is paid only now (seq 7)
+    const state = broadcastServer(live, [donation(50, 5_000, '먼저 확정', 2)])
+
+    renderAt('/broadcasts/7')
+    const section = await panel()
+    await within(section).findByText('먼저 확정')
+
+    state.donations = [donation(3, 3_000, '나중에 확정', 7), ...state.donations]
+    await act(() => vi.advanceTimersByTimeAsync(5000))
+
+    expect(await within(section).findByText('나중에 확정')).toBeInTheDocument()
+    expect(await shownDonations()).toEqual(['후원자 3,000원 나중에 확정', '후원자 5,000원 먼저 확정'])
+    expect(within(section).getByText('후원 합계 8,000원')).toBeInTheDocument()
   })
 
   it('stops refreshing once the 방송 ends', async () => {

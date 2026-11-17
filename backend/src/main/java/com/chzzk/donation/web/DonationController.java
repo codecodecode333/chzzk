@@ -104,9 +104,9 @@ class DonationController {
 
     record HistoryResponse(List<EntryResponse> content, Long nextBefore, Long nextAfter, long total) {}
 
-    record EntryResponse(long id, MemberRef donor, int amount, String message, Instant confirmedAt) {
+    record EntryResponse(long id, long seq, MemberRef donor, int amount, String message, Instant confirmedAt) {
         static EntryResponse of(DonationEntry e) {
-            return new EntryResponse(e.id(), e.donor(), e.amount(), e.message(), e.confirmedAt());
+            return new EntryResponse(e.id(), e.seq(), e.donor(), e.amount(), e.message(), e.confirmedAt());
         }
     }
 }

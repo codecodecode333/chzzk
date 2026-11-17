@@ -58,6 +58,10 @@ public class Donation {
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
 
+    /** The 후원's place in confirmation order (from a database sequence, set when it is confirmed); null until then. */
+    @Column(name = "confirmed_seq", insertable = false, updatable = false)
+    private Long confirmedSeq;
+
     protected Donation() {}
 
     Donation(UUID orderId, long broadcastId, long donorId, long recipientId, int amount, String message,

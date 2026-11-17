@@ -27,13 +27,28 @@ interface DonationRepository extends JpaRepository<Donation, Long> {
     @Query("select m from DonationMember m where m.id = :id")
     Optional<DonationMember> findMember(long id);
 
-    /** {@code PENDING|EXPIRED → CONFIRMED}, recording the provider's payment. */
+    /**
+     * {@code PENDING|EXPIRED → CONFIRMED}, recording the provider's payment and taking the next confirmation sequence
+     * number. Call it inside {@link #lockConfirmationsOf}'s transaction, so the 방송's 후원 commit in sequence order.
+     */
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("update Donation d set d.status = " + STATUS + "CONFIRMED, d.paymentKey = :paymentKey,"
-            + " d.confirmedAt = :confirmedAt, d.failureCode = null"
-            + " where d.orderId = :orderId and d.status in " + OPEN)
+    @Query(value = "update donation set status = 'CONFIRMED', payment_key = :paymentKey, confirmed_at = :confirmedAt,"
+            + " failure_code = null, confirmed_seq = nextval('donation_confirmed_seq')"
+            + " where order_id = :orderId and status in ('PENDING', 'EXPIRED')", nativeQuery = true)
     int markConfirmed(UUID orderId, String paymentKey, Instant confirmedAt);
+
+    /** The advisory lock namespace (first key) of {@link #lockConfirmationsOf}: "don" in ASCII. */
+    int CONFIRMATION_LOCK = 0x646F6E;
+
+    /**
+     * Holds the 방송's confirmation lock until the current transaction ends (a PostgreSQL transaction-level advisory
+     * lock, namespaced by {@link #CONFIRMATION_LOCK}). Confirmations of one 방송 then commit in the order they took
+     * their sequence numbers, so a reader that has seen number {@code n} never later sees a smaller one appear.
+     */
+    @Query(value = "select count(*) from (select pg_advisory_xact_lock(" + CONFIRMATION_LOCK + ","
+            + " cast(:broadcastId % 2147483647 as int))) locked", nativeQuery = true)
+    long lockConfirmationsOf(long broadcastId);
 
     /** {@code PENDING|EXPIRED → FAILED}, with why. */
     @Transactional
@@ -51,14 +66,14 @@ interface DonationRepository extends JpaRepository<Donation, Long> {
 
     // ---- 내역 and 합계 (CONFIRMED only) ----
 
-    String ENTRY = "select new com.chzzk.donation.domain.DonationEntry(d.id, m.id, m.nickname, d.amount, d.message,"
-            + " d.confirmedAt) from Donation d join DonationMember m on m.id = d.donorId"
+    String ENTRY = "select new com.chzzk.donation.domain.DonationEntry(d.id, d.confirmedSeq, m.id, m.nickname,"
+            + " d.amount, d.message, d.confirmedAt) from Donation d join DonationMember m on m.id = d.donorId"
             + " where d.broadcastId = :broadcastId and d.status = " + STATUS + "CONFIRMED ";
 
-    @Query(ENTRY + "and d.id < :before order by d.id desc")
+    @Query(ENTRY + "and d.confirmedSeq < :before order by d.confirmedSeq desc")
     List<DonationEntry> findConfirmed(long broadcastId, long before, Limit limit);
 
-    @Query(ENTRY + "and d.id > :after order by d.id asc")
+    @Query(ENTRY + "and d.confirmedSeq > :after order by d.confirmedSeq asc")
     List<DonationEntry> findConfirmedAfter(long broadcastId, long after, Limit limit);
 
     @Query("select coalesce(sum(d.amount), 0) from Donation d"

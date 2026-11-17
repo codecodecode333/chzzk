@@ -4,13 +4,13 @@ import { listDonations, type DonationEntry } from '../api/donations'
 import { formatDateTime, formatWon } from '../format'
 
 /**
- * Adds freshly read newer 후원 that aren't shown yet, keeping newest first. Ids only grow, so the newcomers sort above
- * what is shown and older pages already loaded stay below.
+ * Adds freshly read newer 후원 that aren't shown yet, keeping newest confirmed first. Confirmation sequence numbers
+ * only grow, so the newcomers sort above what is shown and older pages already loaded stay below.
  */
 function mergeNewer(shown: DonationEntry[], newest: DonationEntry[]): DonationEntry[] {
   const shownIds = new Set(shown.map((d) => d.id))
   const added = newest.filter((d) => !shownIds.has(d.id))
-  return added.length === 0 ? shown : [...added, ...shown].sort((a, b) => b.id - a.id)
+  return added.length === 0 ? shown : [...added, ...shown].sort((a, b) => b.seq - a.seq)
 }
 
 interface Loaded {
@@ -23,8 +23,8 @@ interface Loaded {
 /**
  * The 후원 panel of a 방송: the 후원 합계 and the confirmed 후원 내역, newest first with "더 보기". Anyone sees it.
  *
- * With `refreshEveryMs` (a 방송 중 방송) it reads, that often, every 후원 newer than the newest it has read (page by
- * page with the `after` cursor, so none is skipped) and adds them on top, keeping older pages already loaded; each read
+ * With `refreshEveryMs` (a 방송 중 방송) it reads, that often, every 후원 confirmed after the newest it has read (page by
+ * page with the `after` cursor on `seq`, so none is skipped, even one whose order is older) and adds them on top, keeping older pages already loaded; each read
  * also brings the current 합계. A failed first load is retried on the next tick, and a tick is skipped while the
  * previous read is still waiting. Without it nothing refreshes.
  */
@@ -32,8 +32,8 @@ export function DonationPanel({ broadcastId, refreshEveryMs }: { broadcastId: nu
   const [loaded, setLoaded] = useState<Loaded>()
   const [loadError, setLoadError] = useState<{ broadcastId: number; message: string }>()
   const [loadingMore, setLoadingMore] = useState(false)
-  /** The newest 후원 id read for this 방송 (0: none yet), once its first page has loaded. */
-  const newestRead = useRef<{ broadcastId: number; id: number }>(undefined)
+  /** The newest 후원 `seq` read for this 방송 (0: none yet), once its first page has loaded. */
+  const newestRead = useRef<{ broadcastId: number; seq: number }>(undefined)
   const current = loaded?.broadcastId === broadcastId ? loaded : undefined
   const shownLoadError = loadError?.broadcastId === broadcastId ? loadError.message : null
 
@@ -44,7 +44,7 @@ export function DonationPanel({ broadcastId, refreshEveryMs }: { broadcastId: nu
     async function readFirstPage() {
       const page = await listDonations(broadcastId)
       if (!active) return
-      newestRead.current = { broadcastId, id: page.content[0]?.id ?? 0 }
+      newestRead.current = { broadcastId, seq: page.content[0]?.seq ?? 0 }
       setLoaded({ broadcastId, donations: page.content, nextBefore: page.nextBefore, total: page.total })
       setLoadError(undefined)
     }
@@ -54,8 +54,8 @@ export function DonationPanel({ broadcastId, refreshEveryMs }: { broadcastId: nu
         const page = await listDonations(broadcastId, { after })
         if (!active) return
         if (page.content.length > 0) {
-          after = page.content[0].id
-          newestRead.current = { broadcastId, id: after }
+          after = page.content[0].seq
+          newestRead.current = { broadcastId, seq: after }
         }
         const newer = page.content
         setLoaded((prev) =>
@@ -70,7 +70,7 @@ export function DonationPanel({ broadcastId, refreshEveryMs }: { broadcastId: nu
     async function read() {
       if (reading) return // the previous read is still waiting
       reading = true
-      const cursor = newestRead.current?.broadcastId === broadcastId ? newestRead.current.id : null
+      const cursor = newestRead.current?.broadcastId === broadcastId ? newestRead.current.seq : null
       try {
         if (cursor === null) await readFirstPage()
         else await readNewer(cursor)
@@ -96,7 +96,7 @@ export function DonationPanel({ broadcastId, refreshEveryMs }: { broadcastId: nu
     setLoadingMore(true)
     try {
       const page = await listDonations(broadcastId, { before: current.nextBefore })
-      // A 후원 confirmed meanwhile can't reappear here: older pages only hold ids below the cursor.
+      // A 후원 confirmed meanwhile can't reappear here: older pages only hold `seq` values below the cursor.
       setLoaded((prev) =>
         prev && prev.broadcastId === broadcastId
           ? { ...prev, donations: [...prev.donations, ...page.content], nextBefore: page.nextBefore }

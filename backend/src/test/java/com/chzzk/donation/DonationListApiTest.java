@@ -27,8 +27,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * HTTP API seam for a 방송's 후원 내역 and 합계: public, CONFIRMED 후원 only, newest first, paged like 댓글. 후원 are
- * seeded through the real order and confirm flow, with Toss replaced by the {@link FakePaymentGateway}.
+ * HTTP API seam for a 방송's 후원 내역 and 합계: public, CONFIRMED 후원 only, newest confirmed first, paged like 댓글 but
+ * by each 후원's confirmation sequence ({@code seq}), so a 후원 confirmed after a newer order still reaches a poller.
+ * 후원 are seeded through the real order and confirm flow, with Toss replaced by the {@link FakePaymentGateway}.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {"broadcast.publishing-monitor.enabled=false", "donation.toss.client-key=test_ck_for_tests"})
@@ -60,10 +61,23 @@ class DonationListApiTest {
 
     /** {@code donor} orders and pays a 후원; returns its id. */
     long donate(ApiSession donor, long broadcastId, int amount) {
+        return pay(donor, order(donor, broadcastId, amount));
+    }
+
+    /** {@code donor} pays an order made earlier; returns the 후원's id. */
+    long pay(ApiSession donor, Map<String, Object> order) {
         ResponseEntity<Map<String, Object>> confirmed = confirm(donor,
-                approval(order(donor, broadcastId, amount), "tgen_" + UUID.randomUUID(), amount));
+                approval(order, "tgen_" + UUID.randomUUID(), order.get("amount")));
         assertThat(confirmed.getStatusCode()).as("%s", confirmed.getBody()).isEqualTo(HttpStatus.OK);
         return ((Number) confirmed.getBody().get("id")).longValue();
+    }
+
+    /** The 후원's confirmation sequence number as the 내역 shows it: the cursor for {@code before} and {@code after}. */
+    long seqOf(long broadcastId, long donationId) {
+        return content(ApiSession.visitor(http).get(donationsOf(broadcastId) + "?size=100")).stream()
+                .filter(d -> ((Number) d.get("id")).longValue() == donationId)
+                .map(d -> ((Number) d.get("seq")).longValue())
+                .findFirst().orElseThrow();
     }
 
     @SuppressWarnings("unchecked")
@@ -86,7 +100,7 @@ class DonationListApiTest {
         ResponseEntity<Map<String, Object>> page = ApiSession.visitor(http).get(donationsOf(id));
 
         assertThat(ids(page)).containsExactly(second, first);
-        assertThat(content(page).getFirst()).containsOnlyKeys("id", "donor", "amount", "message", "confirmedAt")
+        assertThat(content(page).getFirst()).containsOnlyKeys("id", "seq", "donor", "amount", "message", "confirmedAt")
                 .containsEntry("donor", ref(donor))
                 .containsEntry("amount", 5_000)
                 .containsEntry("message", "응원해요")
@@ -152,9 +166,10 @@ class DonationListApiTest {
 
         ResponseEntity<Map<String, Object>> first = visitor.get(donationsOf(id) + "?size=2");
         assertThat(ids(first)).containsExactly(d3, d2);
-        assertThat(first.getBody()).containsEntry("nextBefore", (int) d2).containsEntry("total", 6_000);
+        long seq2 = seqOf(id, d2);
+        assertThat(first.getBody()).containsEntry("nextBefore", (int) seq2).containsEntry("total", 6_000);
 
-        ResponseEntity<Map<String, Object>> second = visitor.get(donationsOf(id) + "?size=2&before=" + d2);
+        ResponseEntity<Map<String, Object>> second = visitor.get(donationsOf(id) + "?size=2&before=" + seq2);
         assertThat(ids(second)).containsExactly(d1);
         assertThat(second.getBody()).containsEntry("nextBefore", null).containsEntry("total", 6_000);
     }
@@ -169,15 +184,38 @@ class DonationListApiTest {
         long d4 = donate(donor, id, 4_000);
         ApiSession visitor = ApiSession.visitor(http);
 
-        ResponseEntity<Map<String, Object>> first = visitor.get(donationsOf(id) + "?size=2&after=" + d1);
+        ResponseEntity<Map<String, Object>> first = visitor.get(donationsOf(id) + "?size=2&after=" + seqOf(id, d1));
         assertThat(ids(first)).containsExactly(d3, d2);
-        assertThat(first.getBody()).containsEntry("nextAfter", (int) d3).containsEntry("total", 10_000);
+        long seq3 = seqOf(id, d3);
+        assertThat(first.getBody()).containsEntry("nextAfter", (int) seq3).containsEntry("total", 10_000);
 
-        ResponseEntity<Map<String, Object>> second = visitor.get(donationsOf(id) + "?size=2&after=" + d3);
+        ResponseEntity<Map<String, Object>> second = visitor.get(donationsOf(id) + "?size=2&after=" + seq3);
         assertThat(ids(second)).containsExactly(d4);
         assertThat(second.getBody()).containsEntry("nextAfter", null);
 
-        assertThat(ids(visitor.get(donationsOf(id) + "?after=" + d4))).isEmpty();
+        assertThat(ids(visitor.get(donationsOf(id) + "?after=" + seqOf(id, d4)))).isEmpty();
+    }
+
+    @Test
+    void aDonationConfirmedAfterANewerOrderStillReachesAPoller() {
+        long id = liveBroadcast();
+        ApiSession donor = ApiSession.member(http);
+        Map<String, Object> earlier = order(donor, id, 1_000);
+        Map<String, Object> later = order(donor, id, 2_000);
+        long laterId = pay(donor, later); // the newer order is paid first
+        ApiSession viewer = ApiSession.visitor(http);
+        ResponseEntity<Map<String, Object>> shown = viewer.get(donationsOf(id));
+        assertThat(ids(shown)).containsExactly(laterId);
+        long newestRead = ((Number) content(shown).getFirst().get("seq")).longValue();
+
+        long earlierId = pay(donor, earlier); // ... and the older one a moment later
+
+        ResponseEntity<Map<String, Object>> polled = viewer.get(donationsOf(id) + "?after=" + newestRead);
+        assertThat(ids(polled)).containsExactly(earlierId);
+        assertThat(polled.getBody()).containsEntry("total", 3_000);
+        // the 내역 is in confirmation order, newest confirmed first, and paging by it skips nothing
+        assertThat(ids(viewer.get(donationsOf(id)))).containsExactly(earlierId, laterId);
+        assertThat(ids(viewer.get(donationsOf(id) + "?before=" + seqOf(id, earlierId)))).containsExactly(laterId);
     }
 
     @Test

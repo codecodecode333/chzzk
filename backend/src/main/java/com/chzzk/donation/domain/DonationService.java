@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 후원 (ADR-0004): the one place a 후원 order is created and changes state.
@@ -65,12 +66,15 @@ public class DonationService {
     private final PaymentGateway gateway;
     private final CurrentMember currentMember;
     private final Clock clock;
+    private final TransactionTemplate transaction;
 
-    DonationService(DonationRepository repository, PaymentGateway gateway, CurrentMember currentMember, Clock clock) {
+    DonationService(DonationRepository repository, PaymentGateway gateway, CurrentMember currentMember, Clock clock,
+                    TransactionTemplate transaction) {
         this.repository = repository;
         this.gateway = gateway;
         this.currentMember = currentMember;
         this.clock = clock;
+        this.transaction = transaction;
     }
 
     /**
@@ -208,8 +212,11 @@ public class DonationService {
             return failed(order, PaymentNotConfirmedException.PAYMENT_MISMATCH, "결제 정보가 후원 주문과 다릅니다.");
         }
         Instant confirmedAt = payment.approvedAt() != null ? payment.approvedAt() : now();
-        repository.markConfirmed(order.getOrderId(), payment.paymentKey(),
-                confirmedAt.truncatedTo(ChronoUnit.MICROS));
+        // one 방송's confirmations commit in the order of their 내역 sequence numbers (see lockConfirmationsOf)
+        transaction.executeWithoutResult(tx -> {
+            repository.lockConfirmationsOf(order.getBroadcastId());
+            repository.markConfirmed(order.getOrderId(), payment.paymentKey(), confirmedAt.truncatedTo(ChronoUnit.MICROS));
+        });
         Donation now = reload(order, payment.paymentKey());
         if (now.getStatus() != DonationStatus.CONFIRMED) throw new ConflictException(FAILED_ORDER);
         return view(now);

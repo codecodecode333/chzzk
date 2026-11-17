@@ -76,13 +76,21 @@ export async function failDonation(orderId: string, code: string, message: strin
 /** A confirmed 후원 as a 방송's 내역 shows it. */
 export interface DonationEntry {
   id: number
+  /**
+   * Its place in confirmation order (increasing, with gaps): the 내역's sort key and the `before`/`after` cursor.
+   * Not the id: an order made earlier can be confirmed later.
+   */
+  seq: number
   donor: DonationMember
   amount: number
   message: string | null
   confirmedAt: string
 }
 
-/** One page of a 방송's confirmed 후원 (newest first) with its 후원 합계; the cursors work like 댓글's. */
+/**
+ * One page of a 방송's confirmed 후원 (newest confirmed first) with its 후원 합계. The cursors are `seq` values and
+ * otherwise work like 댓글's.
+ */
 export interface DonationHistoryPage {
   content: DonationEntry[]
   /** Pass as `before` for the next (older) page; `null` when there are no older 후원. */
@@ -93,7 +101,7 @@ export interface DonationHistoryPage {
   total: number
 }
 
-/** Older 후원 than `before`, or (polling) newer ones than `after`. */
+/** 후원 confirmed before the `seq` `before`, or (polling) after the `seq` `after`. */
 export type DonationCursor = { before: number } | { after: number }
 
 /** A 방송's confirmed 후원 and 합계; public. Rejects with 404 for an unknown 방송. */
