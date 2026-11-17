@@ -89,9 +89,12 @@ class DonationWebhookApiTest {
         return http.postForEntity(WEBHOOK, payload, String.class);
     }
 
+    /** The 방송's 합계 as the public 후원 내역 API reports it. */
     long total(long broadcastId) {
-        return jdbc.queryForObject("select coalesce(sum(amount), 0) from donation"
-                + " where broadcast_id = ? and status = 'CONFIRMED'", Long.class, broadcastId);
+        ResponseEntity<Map<String, Object>> page = ApiSession.visitor(http)
+                .get(DonationApiTest.donationsOf(broadcastId));
+        assertThat(page.getStatusCode()).as("%s", page.getBody()).isEqualTo(HttpStatus.OK);
+        return ((Number) page.getBody().get("total")).longValue();
     }
 
     String status(String orderId) {

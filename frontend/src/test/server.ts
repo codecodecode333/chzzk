@@ -13,13 +13,17 @@ const visitorMe = () =>
 
 /**
  * Network boundary for page-component tests; each test registers its own handlers with server.use().
- * By default everyone is a visitor (`/api/me` → 401), the CSRF token is available and every VOD or 방송 has no 댓글
- * (so pages embedding the 댓글 section need no handler for it); see {@link loggedInAs}.
+ * By default everyone is a visitor (`/api/me` → 401), the CSRF token is available, every VOD or 방송 has no 댓글 and
+ * every 방송 no 후원 (so pages embedding the 댓글 section or the 후원 panel need no handler for them); see
+ * {@link loggedInAs}.
  */
 export const server = setupServer(
   http.get('/api/me', visitorMe),
   http.get('/api/vods/:id/comments', () => HttpResponse.json({ content: [], nextBefore: null, nextAfter: null })),
   http.get('/api/broadcasts/:id/comments', () => HttpResponse.json({ content: [], nextBefore: null, nextAfter: null })),
+  http.get('/api/broadcasts/:id/donations', () =>
+    HttpResponse.json({ content: [], nextBefore: null, nextAfter: null, total: 0 }),
+  ),
   http.get('/api/auth/csrf', () => HttpResponse.json({ headerName: 'X-XSRF-TOKEN', token: CSRF_TOKEN })),
 )
 

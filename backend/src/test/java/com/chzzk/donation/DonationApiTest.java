@@ -22,7 +22,6 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -46,9 +45,6 @@ class DonationApiTest {
 
     @Autowired
     FakePaymentGateway payments;
-
-    @Autowired
-    JdbcTemplate jdbc;
 
     @BeforeEach
     void resetPayments() {
@@ -363,13 +359,11 @@ class DonationApiTest {
 
     // ---- idempotency: one approval credits one 후원 ----
 
-    /**
-     * The 방송's 후원 합계 as the spec defines it: the sum of its CONFIRMED orders. Read straight from the table until
-     * the public 내역/합계 endpoint (ticket 02) is on this branch; then read that endpoint's {@code total} instead.
-     */
+    /** The 방송's 후원 합계 as anyone sees it, from the public 내역/합계 endpoint. */
     long total(long broadcastId) {
-        return jdbc.queryForObject("select coalesce(sum(amount), 0) from donation"
-                + " where broadcast_id = ? and status = 'CONFIRMED'", Long.class, broadcastId);
+        ResponseEntity<Map<String, Object>> page = ApiSession.visitor(http).get(donationsOf(broadcastId));
+        assertThat(page.getStatusCode()).as("%s", page.getBody()).isEqualTo(HttpStatus.OK);
+        return ((Number) page.getBody().get("total")).longValue();
     }
 
     @Test

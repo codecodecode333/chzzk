@@ -16,3 +16,8 @@ const dateTimeFormat = new Intl.DateTimeFormat('ko-KR', {
 export function formatDateTime(iso: string): string {
   return dateTimeFormat.format(new Date(iso))
 }
+
+/** An amount of money as shown on screen, e.g. "5,000원". */
+export function formatWon(amount: number): string {
+  return `${amount.toLocaleString('ko-KR')}원`
+}
