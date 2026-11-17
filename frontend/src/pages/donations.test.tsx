@@ -284,6 +284,26 @@ describe('/donations/success', () => {
     expect(confirms).toEqual([{ paymentKey: 'tgen_20261115abc', orderId: ORDER_ID, amount: 10000 }])
   })
 
+  it('shows 후원 완료 again on a refresh: the server answers the repeated confirm with the same 후원', async () => {
+    loggedInAs(VIEWER)
+    const confirms: unknown[] = []
+    server.use(
+      http.post('/api/donations/confirm', async ({ request }) => {
+        confirms.push(await request.json())
+        return HttpResponse.json(confirmed(ORDER_ID, 10000))
+      }),
+    )
+
+    const first = renderAt(`/donations/success?${SUCCESS_QUERY}`)
+    expect(await screen.findByRole('heading', { name: '후원 완료' })).toBeInTheDocument()
+    first.unmount()
+    renderAt(`/donations/success?${SUCCESS_QUERY}`) // the refresh
+
+    expect(await screen.findByRole('heading', { name: '후원 완료' })).toBeInTheDocument()
+    expect(screen.getByText(/10,000원/)).toBeInTheDocument()
+    expect(confirms).toHaveLength(2)
+  })
+
   it('shows the failure and never 후원 완료 when the server refuses to confirm', async () => {
     loggedInAs(VIEWER)
     server.use(
