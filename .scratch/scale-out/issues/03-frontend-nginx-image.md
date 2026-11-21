@@ -12,3 +12,15 @@
 - [ ] Upload body limit ≥ the VOD max file size; long upload/playback requests not cut by proxy timeouts
 - [ ] Smoke-checked with `docker run` against a locally running backend (documented in the ticket notes)
 - [ ] Frontend source and Vite config unchanged
+
+## Notes
+
+Smoke check (2026-11-22): `docker build -t so03-frontend frontend`, run on a user network with Python stub upstreams
+(two `backend` aliases on :8080, one `mediamtx` on :8889; the real backend was not used), published on 18443.
+- `/`, `/vods/3` → 200 SPA shell; `/assets/<hashed>.js` → 200; `/assets/nope.js` → 404; `/healthz` → 200.
+- `/internal`, `/internal/mediamtx/auth`, `/api/../internal/x` (raw and `%2e%2e`) → 404; `/api/a/../vods` raw → 400.
+- `/api/vods?page=1` reaches the backend stub with path, query and original Host intact; a 200 MB multipart POST passes.
+- `/live/cam/whip` → MediaMTX stub sees `/cam/whip` with `Host: mediamtx:8889`; `Location: /live/cam/whip/session-1`;
+  `WWW-Authenticate` dropped on 201 and 401.
+- Spreading: 20 requests split 6/14 over two stubs; a third stub added later got 9 of the next 30 within ~12 s;
+  no upstream connections left ESTABLISHED after requests (no keepalive pinning).

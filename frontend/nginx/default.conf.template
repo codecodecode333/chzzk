@@ -55,6 +55,7 @@ server {
         proxy_pass $mediamtx;             # Host defaults to the upstream's (Vite's changeOrigin)
         # MediaMTX answers with an origin-rooted session Location; keep it under /live so DELETE reaches it.
         proxy_redirect ~^/(.*)$ /live/$1;
+        absolute_redirect off;            # ...and leave it origin-rooted, not https://<server_name>:8443/live/...
         # A 401 without credentials carries a Basic challenge that would pop the browser's login dialog.
         proxy_hide_header WWW-Authenticate;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
