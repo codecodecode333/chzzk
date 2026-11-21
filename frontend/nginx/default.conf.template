@@ -1,0 +1,84 @@
+# Cluster-mode entry point (ADR-0005): serves the built SPA over HTTPS, proxies /api to the backend Service and /live to
+# MediaMTX the same way the Vite dev proxy does. The official image's entrypoint fills in ${VARS} from the environment
+# (NGINX_ENVSUBST_FILTER keeps it to this image's own variables, so nginx's $vars are left alone).
+
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_name _;
+
+    # Self-signed, generated at container start unless a real pair is mounted here (05-self-signed-cert.sh).
+    ssl_certificate     /etc/nginx/certs/tls.crt;
+    ssl_certificate_key /etc/nginx/certs/tls.key;
+
+    root /usr/share/nginx/html;
+
+    # Re-resolve upstream names (resolver + variables below) instead of pinning the address found at startup.
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+
+    # A VOD upload is one multipart request: allow at least the VOD max file size, stream it through without spooling
+    # it to disk first, and don't cut long uploads or a paused progressive-MP4 playback.
+    client_max_body_size ${CLIENT_MAX_BODY_SIZE};
+    client_body_timeout 300s;
+    send_timeout 1h;
+
+    # Probe target for the cluster; answers without touching the backend.
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location /api/ {
+        # The proxied URI is the client's raw one (not nginx's normalized $uri), so refuse dot segments that could
+        # climb out of /api on the backend (e.g. /api/../internal/...).
+        if ($request_uri ~* "(\.|%2e)(\.|%2e)") {
+            return 400;
+        }
+        set $backend http://${BACKEND_UPSTREAM};
+        # No upstream keepalive: nginx's default HTTP/1.0 + "Connection: close" opens a new connection per request,
+        # so the Service spreads every request across the backend pods (new pods included) rather than pinning one.
+        proxy_pass $backend;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+
+    # WHIP/WHEP signaling to MediaMTX on the page's own origin. Mirrors frontend/vite.config.ts.
+    location /live/ {
+        set $mediamtx http://${MEDIAMTX_UPSTREAM};
+        rewrite ^/live/(.*)$ /$1 break;   # strip /live
+        proxy_pass $mediamtx;             # Host defaults to the upstream's (Vite's changeOrigin)
+        # MediaMTX answers with an origin-rooted session Location; keep it under /live so DELETE reaches it.
+        proxy_redirect ~^/(.*)$ /live/$1;
+        # A 401 without credentials carries a Basic challenge that would pop the browser's login dialog.
+        proxy_hide_header WWW-Authenticate;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # The backend's /internal/** (MediaMTX auth callback) is cluster-internal only: never proxied, and not an SPA route.
+    location /internal/ {
+        return 404;
+    }
+    location = /internal {
+        return 404;
+    }
+
+    # Hashed build output: a missing file is a real 404, not the SPA.
+    location /assets/ {
+        try_files $uri =404;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Client routes fall back to the SPA shell.
+    location / {
+        try_files $uri /index.html;
+        add_header Cache-Control "no-cache";
+    }
+}

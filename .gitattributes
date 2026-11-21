@@ -2,3 +2,5 @@
 backend/gradlew text eol=lf
 *.bat text eol=crlf
 *.jar binary
+*.sh text eol=lf
+frontend/nginx/* text eol=lf
