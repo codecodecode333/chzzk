@@ -27,8 +27,11 @@ class DonationExpiryJob {
         this.jobs = jobs;
     }
 
+    /** One round of the sweep; skipped when another instance is running this round. */
     void expire() {
-        int expired = donations.expireStalePending();
-        if (expired > 0) log.info("Expired {} 후원 orders PENDING for over {}", expired, DonationService.EXPIRE_AFTER);
+        jobs.runIfWon(JOB, () -> {
+            int expired = donations.expireStalePending();
+            if (expired > 0) log.info("Expired {} 후원 orders PENDING for over {}", expired, DonationService.EXPIRE_AFTER);
+        });
     }
 }
