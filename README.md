@@ -9,7 +9,8 @@
 | `backend/` | Spring Boot 3 (Java 21, Gradle Kotlin DSL), Flyway, PostgreSQL |
 | `frontend/` | React + Vite + TypeScript + Tailwind CSS |
 | `compose.yaml` | Local PostgreSQL and MediaMTX (backend and frontend run natively) |
-| `deploy/` | Cluster mode: kind config, Kubernetes manifests, up/down scripts (see Cluster mode) |
+| `deploy/` | Cluster mode: kind config, Kubernetes manifests, up/down scripts (see 클러스터 모드) |
+| `load/` | 클러스터 모드 부하(k6)와 유지 확인 스크립트, 실제 실행 기록 `load/results/` |
 | `mediamtx/mediamtx.yml` | MediaMTX config: WebRTC only, auth via the backend's internal callback (ADR-0002) |
 
 ## Prerequisites
@@ -49,7 +50,7 @@ Configured only by environment variables: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`
 - Every response carries `X-Served-By`: the instance name (`HOSTNAME`, the pod name in Kubernetes).
 - Graceful shutdown: in-flight requests get up to 20s to finish (`spring.lifecycle.timeout-per-shutdown-phase`).
 
-## Cluster mode (kind, autoscaling)
+## 클러스터 모드 (자동 확장)
 
 The whole service on a local single-node [kind](https://kind.sigs.k8s.io/) cluster (ADR-0005): PostgreSQL ×1,
 MediaMTX ×1, the backend at 2–5 pods under an HPA (CPU 50% of a 500m request, scale-in after 60s), and nginx as the
@@ -94,6 +95,92 @@ deploy/down.sh   # delete the cluster (database and 영상 파일 included)
 
 Backend pods: CPU request 500m / limit 1, memory 512Mi / 768Mi, readiness and liveness on the actuator probes,
 preStop 5s + 20s graceful shutdown inside a 40s termination grace period.
+
+### 부하와 유지 확인
+
+`deploy/up.sh`로 클러스터를 띄운 뒤, Git Bash 창 두 개(또는 셋)에서:
+
+```sh
+# 1) 확장 지켜보기 (선택)
+kubectl --context kind-chzzk -n chzzk get hpa backend -w
+
+# 2) 유지 확인: 회원·방송·댓글 3개를 직접 만들고, 로그인 세션 하나로 5초마다 한 줄씩 찍는다
+DURATION=420 node load/verify.mjs      # DURATION 없으면 Ctrl+C까지; 끝나면 요약을 찍고 방송을 종료한다
+
+# 3) 부하: grafana/k6:1.3.0 이미지로 실행 (설치 불필요). 30초 램프업 → 3분 유지 → 정지
+load/run-k6.sh                          # VUS=60 RAMP=30s HOLD=3m 기본값, BASE_URL로 대상 변경
+```
+
+- `load/k6-public-reads.js`: 로그인 없는 공개 읽기(방송 목록, VOD 목록, 방송·VOD 댓글)를 섞어 보낸다. 대상은
+  `BASE_URL`(기본 `https://host.docker.internal:8443`, 컨테이너에서 본 진입점), 자체 서명 인증서는 그대로 받는다.
+- `load/verify.mjs`: Node만 있으면 된다(추가 패키지 없음). 한 줄 = 시각, `/api/me` 결과, 방송 수(방송 중 + 종료),
+  자기 방송의 댓글 수, 세 요청의 `X-Served-By`(파드 이름 끝부분), 백엔드 파드 수(ready/전체, `kubectl`로 조회).
+  만든 방송은 미디어를 보내지 않으므로 1분쯤 뒤 서버가 자동 종료한다(송출 감시). 그래서 방송 수는 방송 중과 종료를
+  합쳐 센다. 모든 줄이 첫 줄과 같고 로그인이 유지되면 종료 코드 0.
+
+### 실제 실행 결과 (2026-11-22, Docker Desktop 단일 노드)
+
+전체 기록은 `load/results/`(`hpa-watch.txt`, `pods-watch.txt`, `verify.txt`, `k6-summary.txt`). k6는 04:54:38에
+시작해 04:58:14에 끝났다(VUS=60). 백엔드는 2 → 5로 늘었다가(부하 시작 약 55초 뒤) 부하가 끝나고 약 1분 반 뒤 다시
+2가 됐다(CPU가 내려간 뒤 축소 안정화 60초).
+
+`kubectl get hpa -w` (앞에 붙인 시각은 캡처 때 기록, 일부 줄 생략):
+
+```text
+04:54:31  backend   Deployment/backend   cpu: 2%/50%     2         5         2          24m
+04:55:01  backend   Deployment/backend   cpu: 25%/50%    2         5         2          25m
+04:55:17  backend   Deployment/backend   cpu: 197%/50%   2         5         2          25m
+04:55:32  backend   Deployment/backend   cpu: 197%/50%   2         5         5          25m
+04:56:02  backend   Deployment/backend   cpu: 104%/50%   2         5         5          26m
+04:57:03  backend   Deployment/backend   cpu: 112%/50%   2         5         5          27m
+04:58:20  backend   Deployment/backend   cpu: 130%/50%   2         5         5          28m
+04:58:35  backend   Deployment/backend   cpu: 24%/50%    2         5         5          28m
+04:58:50  backend   Deployment/backend   cpu: 3%/50%     2         5         5          29m
+04:59:35  backend   Deployment/backend   cpu: 2%/50%     2         5         3          29m
+04:59:50  backend   Deployment/backend   cpu: 2%/50%     2         5         2          30m
+```
+
+`node load/verify.mjs` (일부 줄 생략). 새 파드 3개는 04:55:28에 생겼지만 JVM이 부하 속 같은 노드에서 뜨느라
+04:56:55에야 ready가 되어 그때부터 요청을 받았다:
+
+```text
+seeded 회원 vmwqttnyk, 방송 7 (방송 중), 댓글 3개 — https://localhost:8443
+time      me                      방송(전체)  댓글  X-Served-By (me / 방송 / 댓글)  pods(ready/all)
+04:54:18  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/2
+04:55:15  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           2/2
+04:55:22  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/5
+04:56:56  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/5
+04:57:06  200 vmwqttnyk                    7     3  kq2bv / cc24p / kq2bv           5/5
+04:57:09  200 vmwqttnyk                    7     3  hzn96 / cc24p / hzn96           5/5
+04:57:33  200 vmwqttnyk                    7     3  n2gjb / n2gjb / w64w6           5/5
+04:58:12  200 vmwqttnyk                    7     3  n2gjb / w64w6 / kq2bv           5/5
+04:59:20  200 vmwqttnyk                    7     3  w64w6 / w64w6 / hzn96           3/3
+04:59:35  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           2/2
+05:00:00  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/2
+
+83 ticks: 로그인 유지 OK, 방송 수 그대로 OK (7), 댓글 수 그대로 OK (3)
+X-Served-By 5개: backend-6dd89d6b57-w64w6, backend-6dd89d6b57-kq2bv, backend-6dd89d6b57-cc24p, backend-6dd89d6b57-hzn96, backend-6dd89d6b57-n2gjb
+pods seen: 2/2, 2/5, 5/5, 3/3
+```
+
+k6: 요청 48,943건(약 228/s), 실패 0%, 응답 시간 중앙값 417ms · p95 1.99s. 파드가 늘고 줄어드는 동안에도 로그인,
+방송 수, 댓글 수가 그대로였고 요청은 5개 인스턴스가 나눠 처리했다.
+
+### 한계와 조정
+
+- **PostgreSQL과 MediaMTX는 늘리지 않는다.** 상태(세션·VOD·방송·댓글·후원)를 한 곳에 모아 두는 것이 백엔드를
+  자유롭게 늘리고 줄일 수 있는 이유다. PostgreSQL은 복제 구성 없이 1개, MediaMTX는 송출·시청 연결을 직접 쥐고
+  있는 중계기라 여러 개로 나누면 같은 방송의 송출과 시청이 다른 인스턴스로 갈 수 있어 1개로 둔다(ADR-0005).
+- **단일 노드 공유 볼륨.** 영상 파일 볼륨(`ReadWriteOnce`, kind의 로컬 경로)은 모든 파드가 같은 노드에 있을 때만
+  함께 쓸 수 있다. 노드를 늘리려면 영상 파일을 오브젝트 스토리지 같은 곳으로 옮겨야 한다.
+- **같은 노드의 CPU를 나눠 쓴다.** 새 파드도 같은 Docker Desktop CPU를 쓰므로, 부하 중에는 JVM 시작이 느려
+  (위 실행에서 약 90초) 확장 효과가 늦게 나타난다. Docker Desktop에 CPU를 넉넉히 주자.
+- **CPU 요청·목표 조정.** HPA는 파드 CPU 사용량을 요청(`deploy/k8s/30-backend.yaml`의
+  `resources.requests.cpu`, 500m) 대비 비율로 보고 목표(`deploy/k8s/40-hpa.yaml`의 `averageUtilization`, 50%)를
+  넘으면 늘린다. 부하를 걸어도 늘지 않으면 먼저 `VUS`를 올리고, 그래도 안 되면 요청을 낮추거나(예: 250m) 목표를
+  낮춘다. 너무 쉽게 늘면 반대로. 고친 뒤 `kubectl --context kind-chzzk apply -f deploy/k8s/`(또는
+  `deploy/up.sh`)로 반영한다. 위 실행은 기본값(500m, 50%, VUS 60)으로 조정 없이 확장됐다. 축소 속도는
+  `40-hpa.yaml`의 `scaleDown.stabilizationWindowSeconds`(60초).
 
 ## 라이브 on a phone (same Wi-Fi)
 
@@ -205,6 +292,9 @@ client sends it by itself.
 | 후원 실패 (`POST /api/donations/{orderId}/fail`, from the fail page) | that order's 후원자 | `401` / `403`; `404` for an unknown order |
 | Toss payment webhook (`POST /internal/payments/webhook`, no session or CSRF) | anyone; the body is only a hint, re-checked by looking the payment up with Toss | always `200`, except `503` when Toss can't be reached |
 | MediaMTX auth callback (`/internal/mediamtx/auth`) | MediaMTX with the shared secret | bare `401` |
+| 헬스 체크 (`GET /actuator/health/liveness`, `/actuator/health/readiness`; Kubernetes probes. 클러스터 모드의 nginx는 `/actuator`를 넘기지 않으므로 클러스터 안에서만 닿는다) | 누구나 | 나머지 `/actuator/**`는 `404` |
+
+모든 응답에는 그 요청을 처리한 인스턴스 이름(`HOSTNAME`, Kubernetes에서는 파드 이름)이 `X-Served-By` 헤더로 붙는다.
 
 시청, 목록 and 댓글 목록 need no login: a VOD or 방송 link shared with someone should just play, and reading the 댓글
 next to it reveals nothing that isn't already public (only the 작성자's 닉네임, never an email). Login is asked only

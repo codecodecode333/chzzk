@@ -1,0 +1,36 @@
+k6 start 04:54:38, end 04:58:14; VUS=60 RAMP=30s HOLD=3m (progress lines omitted)
+  █ THRESHOLDS 
+
+    checks
+    ✓ 'rate>0.99' rate=100.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 48940   227.572183/s
+    checks_succeeded...: 100.00% 48940 out of 48940
+    checks_failed......: 0.00%   0 out of 48940
+
+    ✓ status 200
+
+    HTTP
+    http_req_duration..............: avg=623.06ms min=4.37ms med=416.67ms max=7.57s p(90)=1.39s p(95)=1.99s
+      { expected_response:true }...: avg=623.06ms min=4.37ms med=416.67ms max=7.57s p(90)=1.39s p(95)=1.99s
+    http_req_failed................: 0.00%  0 out of 48943
+    http_reqs......................: 48943  227.586133/s
+
+    EXECUTION
+    iteration_duration.............: avg=969.35ms min=8.25ms med=753.79ms max=7.57s p(90)=1.95s p(95)=2.53s
+    iterations.....................: 12235  56.893046/s
+    vus............................: 2      min=1          max=60
+    vus_max........................: 60     min=60         max=60
+
+    NETWORK
+    data_received..................: 36 MB  166 kB/s
+    data_sent......................: 2.0 MB 9.5 kB/s
+
+
+
+
+running (3m35.1s), 00/60 VUs, 12235 complete and 0 interrupted iterations
+reads ✓ [ 100% ] 00/60 VUs  3m35s
