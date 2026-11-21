@@ -94,7 +94,9 @@ deploy/down.sh   # delete the cluster (database and 영상 파일 included)
 | `deploy/k8s/metrics-server/` | metrics-server v0.9.1 official manifest, plus `--kubelet-insecure-tls` for kind |
 
 Backend pods: CPU request 500m / limit 1, memory 512Mi / 768Mi, readiness and liveness on the actuator probes,
-preStop 5s + 20s graceful shutdown inside a 40s termination grace period.
+preStop 5s + 20s graceful shutdown inside a 40s termination grace period. The image's entrypoint
+(`backend/docker-entrypoint.sh`) reports the JVM's exit 143 after that SIGTERM as 0, so pods removed on scale-in end
+`Completed`, not `Error`.
 
 ### 부하와 유지 확인
 
@@ -104,8 +106,8 @@ preStop 5s + 20s graceful shutdown inside a 40s termination grace period.
 # 1) 확장 지켜보기 (선택)
 kubectl --context kind-chzzk -n chzzk get hpa backend -w
 
-# 2) 유지 확인: 회원·방송·댓글 3개를 직접 만들고, 로그인 세션 하나로 5초마다 한 줄씩 찍는다
-DURATION=420 node load/verify.mjs      # DURATION 없으면 Ctrl+C까지; 끝나면 요약을 찍고 방송을 종료한다
+# 2) 유지 확인: 회원·방송·댓글 3개·VOD를 직접 만들고, 로그인 세션 하나로 5초마다 한 줄씩 찍는다
+DURATION=540 node load/verify.mjs      # DURATION 없으면 Ctrl+C까지; 끝나면 요약을 찍고 방송을 종료한다
 
 # 3) 부하: grafana/k6:1.3.0 이미지로 실행 (설치 불필요). 30초 램프업 → 3분 유지 → 정지
 load/run-k6.sh                          # VUS=60 RAMP=30s HOLD=3m 기본값, BASE_URL로 대상 변경
@@ -113,58 +115,72 @@ load/run-k6.sh                          # VUS=60 RAMP=30s HOLD=3m 기본값, BAS
 
 - `load/k6-public-reads.js`: 로그인 없는 공개 읽기(방송 목록, VOD 목록, 방송·VOD 댓글)를 섞어 보낸다. 대상은
   `BASE_URL`(기본 `https://host.docker.internal:8443`, 컨테이너에서 본 진입점), 자체 서명 인증서는 그대로 받는다.
-- `load/verify.mjs`: Node만 있으면 된다(추가 패키지 없음). 한 줄 = 시각, `/api/me` 결과, 방송 수(방송 중 + 종료),
-  자기 방송의 댓글 수, 세 요청의 `X-Served-By`(파드 이름 끝부분), 백엔드 파드 수(ready/전체, `kubectl`로 조회).
-  만든 방송은 미디어를 보내지 않으므로 1분쯤 뒤 서버가 자동 종료한다(송출 감시). 그래서 방송 수는 방송 중과 종료를
-  합쳐 센다. 모든 줄이 첫 줄과 같고 로그인이 유지되면 종료 코드 0.
+- `load/verify.mjs`: Node만 있으면 된다(추가 패키지 없음). 시작할 때 작은 MP4(256KB, 스크립트가 생성)를 VOD로
+  등록하고 등록을 처리한 파드를 적어 둔다. 한 줄 = 시각, `/api/me` 결과, 방송 수(방송 중 + 종료), 자기 방송의
+  댓글 수, VOD 재생(매번 다른 4KB 구간을 Range로 받아 올린 바이트와 비교), 네 요청의 `X-Served-By`(파드 이름
+  끝부분), 백엔드 파드 수(ready/전체, `kubectl`로 조회). 만든 방송은 미디어를 보내지 않으므로 1분쯤 뒤 서버가
+  자동 종료한다(송출 감시). 그래서 방송 수는 방송 중과 종료를 합쳐 센다. 모든 줄이 첫 줄과 같고, 로그인이
+  유지되고, VOD가 매번 재생되고 등록 파드가 아닌 파드에서도 한 번 이상 재생되면 종료 코드 0. 끝나면 방송을
+  종료하고 VOD를 지운다.
 
 ### 실제 실행 결과 (2026-11-22, Docker Desktop 단일 노드)
 
-전체 기록은 `load/results/`(`hpa-watch.txt`, `pods-watch.txt`, `verify.txt`, `k6-summary.txt`). k6는 04:54:38에
-시작해 04:58:14에 끝났다(VUS=60). 백엔드는 2 → 5로 늘었다가(부하 시작 약 55초 뒤) 부하가 끝나고 약 1분 반 뒤 다시
-2가 됐다(CPU가 내려간 뒤 축소 안정화 60초).
+전체 기록은 `load/results/`(`hpa-watch.txt`, `pods-watch.txt`, `verify.txt`, `k6-summary.txt`, `job-lease.txt`).
+k6는 05:24:42에 시작해 05:28:19에 끝났다(VUS=60). 백엔드는 부하 시작 약 40초 뒤 2 → 5로 늘었고, 부하가 끝나고
+약 1분 반 뒤(CPU가 내려간 뒤 축소 안정화 60초) 다시 2가 됐다. 축소로 내려간 파드 3개는 정상 종료(`Completed`,
+종료 코드 0)로 끝났다.
 
 `kubectl get hpa -w` (앞에 붙인 시각은 캡처 때 기록, 일부 줄 생략):
 
 ```text
-04:54:31  backend   Deployment/backend   cpu: 2%/50%     2         5         2          24m
-04:55:01  backend   Deployment/backend   cpu: 25%/50%    2         5         2          25m
-04:55:17  backend   Deployment/backend   cpu: 197%/50%   2         5         2          25m
-04:55:32  backend   Deployment/backend   cpu: 197%/50%   2         5         5          25m
-04:56:02  backend   Deployment/backend   cpu: 104%/50%   2         5         5          26m
-04:57:03  backend   Deployment/backend   cpu: 112%/50%   2         5         5          27m
-04:58:20  backend   Deployment/backend   cpu: 130%/50%   2         5         5          28m
-04:58:35  backend   Deployment/backend   cpu: 24%/50%    2         5         5          28m
-04:58:50  backend   Deployment/backend   cpu: 3%/50%     2         5         5          29m
-04:59:35  backend   Deployment/backend   cpu: 2%/50%     2         5         3          29m
-04:59:50  backend   Deployment/backend   cpu: 2%/50%     2         5         2          30m
+05:24:39  backend   Deployment/backend   cpu: 11%/50%    2         5         2          55m
+05:25:09  backend   Deployment/backend   cpu: 168%/50%   2         5         2          55m
+05:25:25  backend   Deployment/backend   cpu: 199%/50%   2         5         5          55m
+05:26:41  backend   Deployment/backend   cpu: 166%/50%   2         5         5          57m
+05:28:27  backend   Deployment/backend   cpu: 118%/50%   2         5         5          58m
+05:28:42  backend   Deployment/backend   cpu: 46%/50%    2         5         5          59m
+05:29:12  backend   Deployment/backend   cpu: 2%/50%     2         5         5          59m
+05:29:57  backend   Deployment/backend   cpu: 1%/50%     2         5         2          60m
 ```
 
-`node load/verify.mjs` (일부 줄 생략). 새 파드 3개는 04:55:28에 생겼지만 JVM이 부하 속 같은 노드에서 뜨느라
-04:56:55에야 ready가 되어 그때부터 요청을 받았다:
+`kubectl get pods -l app=backend -w` (일부 줄 생략):
 
 ```text
-seeded 회원 vmwqttnyk, 방송 7 (방송 중), 댓글 3개 — https://localhost:8443
-time      me                      방송(전체)  댓글  X-Served-By (me / 방송 / 댓글)  pods(ready/all)
-04:54:18  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/2
-04:55:15  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           2/2
-04:55:22  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/5
-04:56:56  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/5
-04:57:06  200 vmwqttnyk                    7     3  kq2bv / cc24p / kq2bv           5/5
-04:57:09  200 vmwqttnyk                    7     3  hzn96 / cc24p / hzn96           5/5
-04:57:33  200 vmwqttnyk                    7     3  n2gjb / n2gjb / w64w6           5/5
-04:58:12  200 vmwqttnyk                    7     3  n2gjb / w64w6 / kq2bv           5/5
-04:59:20  200 vmwqttnyk                    7     3  w64w6 / w64w6 / hzn96           3/3
-04:59:35  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           2/2
-05:00:00  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/2
-
-83 ticks: 로그인 유지 OK, 방송 수 그대로 OK (7), 댓글 수 그대로 OK (3)
-X-Served-By 5개: backend-6dd89d6b57-w64w6, backend-6dd89d6b57-kq2bv, backend-6dd89d6b57-cc24p, backend-6dd89d6b57-hzn96, backend-6dd89d6b57-n2gjb
-pods seen: 2/2, 2/5, 5/5, 3/3
+05:25:10  backend-7bdf575776-f9kll   0/1     Pending           0          0s
+05:26:37  backend-7bdf575776-bwhkq   1/1     Running           0          88s
+05:29:42  backend-7bdf575776-bwhkq   1/1     Terminating       0          4m33s
+05:29:48  backend-7bdf575776-bwhkq   0/1     Completed         0          4m39s
+05:29:48  backend-7bdf575776-mcbbl   0/1     Completed         0          4m39s
+05:29:48  backend-7bdf575776-f9kll   0/1     Completed         0          4m39s
 ```
 
-k6: 요청 48,943건(약 228/s), 실패 0%, 응답 시간 중앙값 417ms · p95 1.99s. 파드가 늘고 줄어드는 동안에도 로그인,
-방송 수, 댓글 수가 그대로였고 요청은 5개 인스턴스가 나눠 처리했다.
+`node load/verify.mjs` (일부 줄 생략). VOD는 `7x598`에서 등록됐고, 새 파드가 ready가 되자마자(05:26:43)
+`bwhkq`가 그 영상을 내려줬다. 새 파드 3개는 05:25:10에 생겼지만 JVM이 부하 속 같은 노드에서 뜨느라 05:26:37–49에야
+ready가 되어 그때부터 요청을 받았다:
+
+```text
+seeded 회원 vmwquwcfi, 방송 10 (방송 중), 댓글 3개, VOD 6 (262144B, 등록: backend-7bdf575776-7x598) — https://localhost:8443
+time      me                      방송(전체)  댓글  VOD  X-Served-By (me / 방송 / 댓글 / VOD)  pods(ready/all)
+05:24:23  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 7x598         2/2
+05:25:14  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 5zz9h         2/5
+05:26:43  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / bwhkq         3/5
+05:26:49  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 5zz9h         5/5
+05:26:57  200 vmwquwcfi                   10     3   OK  mcbbl / 7x598 / bwhkq / f9kll         5/5
+05:27:03  200 vmwquwcfi                   10     3   OK  f9kll / 5zz9h / mcbbl / mcbbl         5/5
+05:29:40  200 vmwquwcfi                   10     3   OK  f9kll / 7x598 / bwhkq / 5zz9h         5/5
+05:29:45  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 5zz9h         2/2
+05:31:00  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 5zz9h         2/2
+
+108 ticks: 로그인 유지 OK, 방송 수 그대로 OK (10), 댓글 수 그대로 OK (3), VOD 재생 OK
+VOD 6: backend-7bdf575776-7x598에서 등록, 재생한 파드 5개 (등록 파드 외 4개): backend-7bdf575776-7x598, backend-7bdf575776-5zz9h, backend-7bdf575776-bwhkq, backend-7bdf575776-f9kll, backend-7bdf575776-mcbbl
+X-Served-By 5개: backend-7bdf575776-5zz9h, backend-7bdf575776-7x598, backend-7bdf575776-bwhkq, backend-7bdf575776-mcbbl, backend-7bdf575776-f9kll
+pods seen: 2/2, 2/5, 3/5, 4/5, 5/5
+```
+
+k6: 요청 54,343건(약 253/s), 실패 0%, 응답 시간 중앙값 376ms · p95 1.63s. 파드가 늘고 줄어드는 동안에도 로그인,
+방송 수, 댓글 수가 그대로였고, 한 파드에서 등록한 VOD를 다른 네 파드가 그대로 재생했으며, 요청은 5개 인스턴스가
+나눠 처리했다. 같은 부하 중 파드 5개일 때 `job_lease`를 2초마다 본 결과(`job-lease.txt`), 송출 감시는 10초에 한 번,
+후원 만료는 1분에 한 번만 시작됐다(파드 수와 무관하게 주기당 한 번).
 
 ### 한계와 조정
 

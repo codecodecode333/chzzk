@@ -1,0 +1,15 @@
+job_lease, sampled every 2s for ~100s during the k6 load with 5 backend pods (times are UTC = local 05:26–05:28):
+distinct (job, last_started_at) values seen. Each job's round started once per interval across all 5 pods.
+broadcast.publishing-monitor 20:27:19.379
+broadcast.publishing-monitor 20:27:29.505
+broadcast.publishing-monitor 20:27:39.576
+broadcast.publishing-monitor 20:27:49.736
+broadcast.publishing-monitor 20:27:59.746
+broadcast.publishing-monitor 20:28:09.859
+broadcast.publishing-monitor 20:28:20.212
+broadcast.publishing-monitor 20:28:30.231
+broadcast.publishing-monitor 20:28:40.250
+broadcast.publishing-monitor 20:28:50.268
+donation.expiry 20:26:30.661
+donation.expiry 20:27:30.765
+donation.expiry 20:28:30.946

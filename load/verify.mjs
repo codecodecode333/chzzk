@@ -3,8 +3,9 @@
 // X-Served-By of those calls, backend pod count.
 // Seeds its own 회원, 방송, 댓글 and VOD (a small generated MP4) first, noting which pod registered the VOD; each tick
 // fetches a different byte range of that VOD's video and checks it byte for byte, so a VOD registered via one pod is
-// seen playing via the others (the shared 영상 파일 PVC). Ends the 방송 and deletes the VOD on exit. The 방송 sends no media, so the server auto-ends it
-// after about a minute (BroadcastLifecycle.AUTO_END_AFTER): that's why 방송 중 and 종료 are counted together.
+// seen playing via the others (the shared 영상 파일 PVC). Ends the 방송 and deletes the VOD on exit.
+// The 방송 sends no media, so the server auto-ends it after about a minute (BroadcastLifecycle.AUTO_END_AFTER): that's why 방송 중 and 종료 are counted together, as
+// distinct ids (first 100 of each; the demo cluster has far fewer).
 //
 //   node load/verify.mjs                 # until Ctrl+C
 //   DURATION=420 node load/verify.mjs    # seconds
@@ -102,15 +103,17 @@ let errors = 0;
 async function tick() {
   const [me, list, ended, comments, play, podCount] = await Promise.all([
     call('GET', '/api/me'),
-    call('GET', '/api/broadcasts?status=LIVE'),
-    call('GET', '/api/broadcasts?status=ENDED'),
+    call('GET', '/api/broadcasts?status=LIVE&size=100'),
+    call('GET', '/api/broadcasts?status=ENDED&size=100'),
     call('GET', `/api/broadcasts/${broadcast.id}/comments`),
     playRange(ticks.length),
     pods(),
   ]);
   const t = {
     me: me.status === 200 ? `200 ${me.body.nickname}` : `${me.status} LOGGED OUT`,
-    live: list.status === 200 && ended.status === 200 ? list.body.totalElements + ended.body.totalElements
+    // distinct ids: a 방송 auto-ended between the two requests shows up in both lists
+    live: list.status === 200 && ended.status === 200
+      ? new Set([...list.body.content, ...ended.body.content].map((b) => b.id)).size
       : `HTTP ${list.status}/${ended.status}`,
     comments: comments.status === 200 ? comments.body.content.length : `HTTP ${comments.status}`,
     vod: play.ok,

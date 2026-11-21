@@ -1,89 +1,115 @@
-seeded 회원 vmwqttnyk, 방송 7 (방송 중), 댓글 3개 — https://localhost:8443
-time      me                      방송(전체)  댓글  X-Served-By (me / 방송 / 댓글)  pods(ready/all)
-04:54:18  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/2
-04:54:23  200 vmwqttnyk                    7     3  kq2bv / kq2bv / w64w6           2/2
-04:54:28  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/2
-04:54:33  200 vmwqttnyk                    7     3  kq2bv / kq2bv / kq2bv           2/2
-04:54:38  200 vmwqttnyk                    7     3  w64w6 / kq2bv / kq2bv           2/2
-04:54:44  200 vmwqttnyk                    7     3  kq2bv / kq2bv / kq2bv           2/2
-04:54:49  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/2
-04:54:54  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/2
-04:54:59  200 vmwqttnyk                    7     3  w64w6 / kq2bv / kq2bv           2/2
-04:55:05  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/2
-04:55:10  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/2
-04:55:15  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           2/2
-04:55:22  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/5
-04:55:25  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/5
-04:55:33  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/5
-04:55:37  200 vmwqttnyk                    7     3  w64w6 / kq2bv / kq2bv           2/5
-04:55:42  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/5
-04:55:45  200 vmwqttnyk                    7     3  w64w6 / kq2bv / kq2bv           2/5
-04:55:49  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/5
-04:55:55  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/5
-04:56:00  200 vmwqttnyk                    7     3  kq2bv / kq2bv / kq2bv           2/5
-04:56:06  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/5
-04:56:10  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/5
-04:56:15  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/5
-04:56:20  200 vmwqttnyk                    7     3  w64w6 / kq2bv / kq2bv           2/5
-04:56:25  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/5
-04:56:30  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/5
-04:56:37  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/5
-04:56:41  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/5
-04:56:46  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/5
-04:56:51  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/5
-04:56:56  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/5
-04:57:06  200 vmwqttnyk                    7     3  kq2bv / cc24p / kq2bv           5/5
-04:57:09  200 vmwqttnyk                    7     3  hzn96 / cc24p / hzn96           5/5
-04:57:14  200 vmwqttnyk                    7     3  hzn96 / cc24p / cc24p           5/5
-04:57:19  200 vmwqttnyk                    7     3  w64w6 / kq2bv / hzn96           5/5
-04:57:29  200 vmwqttnyk                    7     3  hzn96 / cc24p / cc24p           5/5
-04:57:33  200 vmwqttnyk                    7     3  n2gjb / n2gjb / w64w6           5/5
-04:57:39  200 vmwqttnyk                    7     3  cc24p / cc24p / n2gjb           5/5
-04:57:40  200 vmwqttnyk                    7     3  cc24p / hzn96 / kq2bv           5/5
-04:57:46  200 vmwqttnyk                    7     3  kq2bv / cc24p / hzn96           5/5
-04:57:55  200 vmwqttnyk                    7     3  hzn96 / n2gjb / cc24p           5/5
-04:57:58  200 vmwqttnyk                    7     3  kq2bv / w64w6 / n2gjb           5/5
-04:58:01  200 vmwqttnyk                    7     3  kq2bv / kq2bv / w64w6           5/5
-04:58:07  200 vmwqttnyk                    7     3  w64w6 / cc24p / cc24p           5/5
-04:58:12  200 vmwqttnyk                    7     3  n2gjb / w64w6 / kq2bv           5/5
-04:58:15  200 vmwqttnyk                    7     3  cc24p / w64w6 / kq2bv           5/5
-04:58:20  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           5/5
-04:58:25  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           5/5
-04:58:30  200 vmwqttnyk                    7     3  w64w6 / n2gjb / cc24p           5/5
-04:58:35  200 vmwqttnyk                    7     3  hzn96 / hzn96 / w64w6           5/5
-04:58:41  200 vmwqttnyk                    7     3  cc24p / cc24p / n2gjb           5/5
-04:58:46  200 vmwqttnyk                    7     3  w64w6 / w64w6 / hzn96           5/5
-04:58:50  200 vmwqttnyk                    7     3  w64w6 / w64w6 / n2gjb           5/5
-04:58:56  200 vmwqttnyk                    7     3  cc24p / kq2bv / cc24p           5/5
-04:59:01  200 vmwqttnyk                    7     3  kq2bv / n2gjb / hzn96           5/5
-04:59:06  200 vmwqttnyk                    7     3  hzn96 / cc24p / cc24p           5/5
-04:59:10  200 vmwqttnyk                    7     3  n2gjb / n2gjb / kq2bv           5/5
-04:59:15  200 vmwqttnyk                    7     3  w64w6 / w64w6 / cc24p           5/5
-04:59:20  200 vmwqttnyk                    7     3  w64w6 / w64w6 / hzn96           3/3
-04:59:26  200 vmwqttnyk                    7     3  cc24p / kq2bv / cc24p           3/3
-04:59:30  200 vmwqttnyk                    7     3  cc24p / cc24p / kq2bv           3/3
-04:59:35  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           2/2
-04:59:40  200 vmwqttnyk                    7     3  w64w6 / kq2bv / w64w6           2/2
-04:59:46  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/2
-04:59:50  200 vmwqttnyk                    7     3  kq2bv / kq2bv / kq2bv           2/2
-04:59:55  200 vmwqttnyk                    7     3  kq2bv / kq2bv / w64w6           2/2
-05:00:00  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/2
-05:00:05  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/2
-05:00:10  200 vmwqttnyk                    7     3  kq2bv / w64w6 / kq2bv           2/2
-05:00:15  200 vmwqttnyk                    7     3  kq2bv / kq2bv / w64w6           2/2
-05:00:20  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/2
-05:00:25  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/2
-05:00:30  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/2
-05:00:35  200 vmwqttnyk                    7     3  kq2bv / kq2bv / kq2bv           2/2
-05:00:40  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/2
-05:00:45  200 vmwqttnyk                    7     3  w64w6 / kq2bv / kq2bv           2/2
-05:00:50  200 vmwqttnyk                    7     3  kq2bv / kq2bv / kq2bv           2/2
-05:00:55  200 vmwqttnyk                    7     3  w64w6 / kq2bv / kq2bv           2/2
-05:01:00  200 vmwqttnyk                    7     3  w64w6 / w64w6 / w64w6           2/2
-05:01:05  200 vmwqttnyk                    7     3  kq2bv / w64w6 / w64w6           2/2
-05:01:10  200 vmwqttnyk                    7     3  w64w6 / w64w6 / kq2bv           2/2
-05:01:15  200 vmwqttnyk                    7     3  kq2bv / kq2bv / w64w6           2/2
+seeded 회원 vmwquwcfi, 방송 10 (방송 중), 댓글 3개, VOD 6 (262144B, 등록: backend-7bdf575776-7x598) — https://localhost:8443
+time      me                      방송(전체)  댓글  VOD  X-Served-By (me / 방송 / 댓글 / VOD)  pods(ready/all)
+05:24:23  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 7x598         2/2
+05:24:28  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 7x598         2/2
+05:24:33  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 5zz9h         2/2
+05:24:38  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 7x598         2/2
+05:24:43  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 7x598         2/2
+05:24:49  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 7x598         2/2
+05:24:54  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 7x598 / 5zz9h         2/2
+05:24:59  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 7x598         2/2
+05:25:04  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 7x598 / 5zz9h         2/2
+05:25:10  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/2
+05:25:14  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 5zz9h         2/5
+05:25:21  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 5zz9h         2/5
+05:25:25  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / 5zz9h         2/5
+05:25:31  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 7x598         2/5
+05:25:35  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/5
+05:25:42  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 5zz9h         2/5
+05:25:46  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 5zz9h         2/5
+05:25:49  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / 7x598         2/5
+05:25:55  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/5
+05:26:00  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / 5zz9h         2/5
+05:26:05  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / 5zz9h         2/5
+05:26:09  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 7x598         2/5
+05:26:14  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 7x598         2/5
+05:26:19  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 5zz9h         2/5
+05:26:25  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 7x598         2/5
+05:26:30  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 7x598         2/5
+05:26:36  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/5
+05:26:43  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / bwhkq         3/5
+05:26:46  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 7x598         4/5
+05:26:49  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 5zz9h         5/5
+05:26:57  200 vmwquwcfi                   10     3   OK  mcbbl / 7x598 / bwhkq / f9kll         5/5
+05:27:03  200 vmwquwcfi                   10     3   OK  f9kll / 5zz9h / mcbbl / mcbbl         5/5
+05:27:08  200 vmwquwcfi                   10     3   OK  mcbbl / f9kll / 5zz9h / 7x598         5/5
+05:27:11  200 vmwquwcfi                   10     3   OK  bwhkq / mcbbl / 5zz9h / bwhkq         5/5
+05:27:15  200 vmwquwcfi                   10     3   OK  mcbbl / bwhkq / 7x598 / mcbbl         5/5
+05:27:24  200 vmwquwcfi                   10     3   OK  bwhkq / f9kll / mcbbl / 7x598         5/5
+05:27:25  200 vmwquwcfi                   10     3   OK  7x598 / mcbbl / 7x598 / bwhkq         5/5
+05:27:30  200 vmwquwcfi                   10     3   OK  f9kll / bwhkq / 5zz9h / bwhkq         5/5
+05:27:36  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / f9kll         5/5
+05:27:42  200 vmwquwcfi                   10     3   OK  bwhkq / 7x598 / bwhkq / bwhkq         5/5
+05:27:46  200 vmwquwcfi                   10     3   OK  bwhkq / f9kll / mcbbl / mcbbl         5/5
+05:27:51  200 vmwquwcfi                   10     3   OK  f9kll / bwhkq / 5zz9h / 5zz9h         5/5
+05:27:55  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 7x598         5/5
+05:28:01  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / f9kll / bwhkq         5/5
+05:28:05  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 7x598         5/5
+05:28:11  200 vmwquwcfi                   10     3   OK  5zz9h / mcbbl / bwhkq / f9kll         5/5
+05:28:15  200 vmwquwcfi                   10     3   OK  bwhkq / 5zz9h / 5zz9h / 5zz9h         5/5
+05:28:19  200 vmwquwcfi                   10     3   OK  7x598 / f9kll / f9kll / mcbbl         5/5
+05:28:24  200 vmwquwcfi                   10     3   OK  bwhkq / 5zz9h / 5zz9h / bwhkq         5/5
+05:28:29  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / f9kll / f9kll         5/5
+05:28:34  200 vmwquwcfi                   10     3   OK  bwhkq / 7x598 / mcbbl / bwhkq         5/5
+05:28:40  200 vmwquwcfi                   10     3   OK  f9kll / mcbbl / 7x598 / f9kll         5/5
+05:28:45  200 vmwquwcfi                   10     3   OK  mcbbl / 7x598 / f9kll / mcbbl         5/5
+05:28:50  200 vmwquwcfi                   10     3   OK  mcbbl / 5zz9h / mcbbl / 7x598         5/5
+05:28:55  200 vmwquwcfi                   10     3   OK  mcbbl / mcbbl / 5zz9h / bwhkq         5/5
+05:29:00  200 vmwquwcfi                   10     3   OK  bwhkq / 5zz9h / bwhkq / mcbbl         5/5
+05:29:05  200 vmwquwcfi                   10     3   OK  mcbbl / 5zz9h / bwhkq / 5zz9h         5/5
+05:29:10  200 vmwquwcfi                   10     3   OK  f9kll / 5zz9h / f9kll / 5zz9h         5/5
+05:29:15  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / bwhkq / bwhkq         5/5
+05:29:20  200 vmwquwcfi                   10     3   OK  5zz9h / mcbbl / mcbbl / bwhkq         5/5
+05:29:25  200 vmwquwcfi                   10     3   OK  7x598 / mcbbl / 7x598 / bwhkq         5/5
+05:29:30  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / bwhkq         5/5
+05:29:35  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 5zz9h         5/5
+05:29:40  200 vmwquwcfi                   10     3   OK  f9kll / 7x598 / bwhkq / 5zz9h         5/5
+05:29:45  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 5zz9h         2/2
+05:29:50  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/2
+05:29:55  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 5zz9h         2/2
+05:30:00  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 7x598 / 7x598         2/2
+05:30:05  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/2
+05:30:10  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 5zz9h         2/2
+05:30:15  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 7x598 / 7x598         2/2
+05:30:20  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/2
+05:30:25  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 5zz9h         2/2
+05:30:30  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 5zz9h         2/2
+05:30:35  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 5zz9h         2/2
+05:30:40  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 7x598         2/2
+05:30:45  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 5zz9h         2/2
+05:30:50  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 7x598         2/2
+05:30:55  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/2
+05:31:00  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 5zz9h         2/2
+05:31:05  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / 7x598         2/2
+05:31:10  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 5zz9h         2/2
+05:31:15  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 7x598         2/2
+05:31:20  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/2
+05:31:25  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/2
+05:31:30  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 5zz9h         2/2
+05:31:35  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 7x598         2/2
+05:31:40  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 7x598 / 7x598         2/2
+05:31:45  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/2
+05:31:50  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 5zz9h         2/2
+05:31:55  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/2
+05:32:00  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 7x598         2/2
+05:32:05  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/2
+05:32:10  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 7x598 / 5zz9h         2/2
+05:32:15  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 7x598         2/2
+05:32:20  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 7x598 / 7x598         2/2
+05:32:25  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 5zz9h         2/2
+05:32:30  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 5zz9h / 7x598         2/2
+05:32:35  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 7x598         2/2
+05:32:40  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 7x598         2/2
+05:32:45  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 7x598 / 5zz9h         2/2
+05:32:50  200 vmwquwcfi                   10     3   OK  5zz9h / 7x598 / 5zz9h / 7x598         2/2
+05:32:55  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/2
+05:33:00  200 vmwquwcfi                   10     3   OK  5zz9h / 5zz9h / 5zz9h / 7x598         2/2
+05:33:05  200 vmwquwcfi                   10     3   OK  7x598 / 5zz9h / 7x598 / 7x598         2/2
+05:33:10  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 5zz9h         2/2
+05:33:15  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 7x598 / 5zz9h         2/2
+05:33:20  200 vmwquwcfi                   10     3   OK  7x598 / 7x598 / 5zz9h / 7x598         2/2
 
-83 ticks: 로그인 유지 OK, 방송 수 그대로 OK (7), 댓글 수 그대로 OK (3)
-X-Served-By 5개: backend-6dd89d6b57-w64w6, backend-6dd89d6b57-kq2bv, backend-6dd89d6b57-cc24p, backend-6dd89d6b57-hzn96, backend-6dd89d6b57-n2gjb
-pods seen: 2/2, 2/5, 5/5, 3/3
+108 ticks: 로그인 유지 OK, 방송 수 그대로 OK (10), 댓글 수 그대로 OK (3), VOD 재생 OK
+VOD 6: backend-7bdf575776-7x598에서 등록, 재생한 파드 5개 (등록 파드 외 4개): backend-7bdf575776-7x598, backend-7bdf575776-5zz9h, backend-7bdf575776-bwhkq, backend-7bdf575776-f9kll, backend-7bdf575776-mcbbl
+X-Served-By 5개: backend-7bdf575776-5zz9h, backend-7bdf575776-7x598, backend-7bdf575776-bwhkq, backend-7bdf575776-mcbbl, backend-7bdf575776-f9kll
+pods seen: 2/2, 2/5, 3/5, 4/5, 5/5
