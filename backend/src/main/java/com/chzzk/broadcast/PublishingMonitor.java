@@ -2,6 +2,7 @@ package com.chzzk.broadcast;
 
 import com.chzzk.broadcast.domain.BroadcastLifecycle;
 import com.chzzk.broadcast.media.MediaServerGateway;
+import com.chzzk.common.job.SingleInstanceJobs;
 import java.util.List;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -21,12 +22,17 @@ class PublishingMonitor {
 
     private static final Logger log = LoggerFactory.getLogger(PublishingMonitor.class);
 
+    /** The job's lock key: one instance runs each round. */
+    static final String JOB = "broadcast.publishing-monitor";
+
     private final MediaServerGateway mediaServer;
     private final BroadcastLifecycle lifecycle;
+    private final SingleInstanceJobs jobs;
 
-    PublishingMonitor(MediaServerGateway mediaServer, BroadcastLifecycle lifecycle) {
+    PublishingMonitor(MediaServerGateway mediaServer, BroadcastLifecycle lifecycle, SingleInstanceJobs jobs) {
         this.mediaServer = mediaServer;
         this.lifecycle = lifecycle;
+        this.jobs = jobs;
     }
 
     @Scheduled(fixedDelayString = "${broadcast.publishing-monitor.interval:10s}",
