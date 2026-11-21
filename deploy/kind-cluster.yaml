@@ -1,0 +1,18 @@
+# Single-node kind cluster for cluster mode (ADR-0005). Created by deploy/up.sh as cluster "chzzk".
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  # The Kubernetes API stays on this PC only (random port on 127.0.0.1).
+  apiServerAddress: "127.0.0.1"
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # HTTPS entry point: nginx Service (NodePort 30443). On all interfaces so a phone on the same Wi-Fi can open
+      # https://<LAN_IP>:8443 for 라이브, like the Vite dev server.
+      - containerPort: 30443
+        hostPort: 8443
+        protocol: TCP
+      # WebRTC media: MediaMTX Service (NodePort 30189, UDP). MediaMTX advertises LAN_IP:8189 (and 127.0.0.1:8189).
+      - containerPort: 30189
+        hostPort: 8189
+        protocol: UDP

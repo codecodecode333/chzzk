@@ -9,6 +9,7 @@
 | `backend/` | Spring Boot 3 (Java 21, Gradle Kotlin DSL), Flyway, PostgreSQL |
 | `frontend/` | React + Vite + TypeScript + Tailwind CSS |
 | `compose.yaml` | Local PostgreSQL and MediaMTX (backend and frontend run natively) |
+| `deploy/` | Cluster mode: kind config, Kubernetes manifests, up/down scripts (see Cluster mode) |
 | `mediamtx/mediamtx.yml` | MediaMTX config: WebRTC only, auth via the backend's internal callback (ADR-0002) |
 
 ## Prerequisites
@@ -47,6 +48,52 @@ Configured only by environment variables: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`
   `/actuator` is reachable (`404`).
 - Every response carries `X-Served-By`: the instance name (`HOSTNAME`, the pod name in Kubernetes).
 - Graceful shutdown: in-flight requests get up to 20s to finish (`spring.lifecycle.timeout-per-shutdown-phase`).
+
+## Cluster mode (kind, autoscaling)
+
+The whole service on a local single-node [kind](https://kind.sigs.k8s.io/) cluster (ADR-0005): PostgreSQL ×1,
+MediaMTX ×1, the backend at 2–5 pods under an HPA (CPU 50% of a 500m request, scale-in after 60s), and nginx as the
+HTTPS entry point. The dev flow above is unchanged; everything for this mode is in `deploy/`.
+
+Needs Docker running (Docker Desktop: give it ≥ 6 CPUs / 8 GB) and `kubectl` (Docker Desktop ships one). Run the
+scripts from **Git Bash** (or any POSIX shell):
+
+```sh
+deploy/up.sh     # create cluster "chzzk", build + side-load images, Secret from .env, apply, wait until ready
+                 # re-run after code changes: rebuilds the images and rolls the pods, keeps data
+deploy/down.sh   # delete the cluster (database and 영상 파일 included)
+```
+
+- **kind** itself: `up.sh` runs `deploy/fetch-kind.sh` on first use, which downloads the pinned release from
+  github.com/kubernetes-sigs/kind and checks it against the release's SHA256 into `deploy/.tools/` (git-ignored).
+  Or `winget install Kubernetes.kind`; a `kind` on `PATH` is used when `deploy/.tools/` has none.
+- **Open** https://localhost:8443 (self-signed certificate, generated per nginx pod). Host port 8443 (TCP) and 8189
+  (UDP, WebRTC media) are published on all interfaces like the dev setup, so a phone on the same Wi-Fi can use
+  `https://<LAN_IP>:8443`; the Kubernetes API listens on 127.0.0.1 only.
+- **Secrets**: `up.sh` builds the Secret `chzzk-env` from the repo-root `.env` (`MEDIAMTX_AUTH_SECRET`, `LAN_IP`,
+  `TOSS_CLIENT_KEY`/`TOSS_SECRET_KEY` if set). Without `.env`, `LAN_IP` is `127.0.0.1` and a random
+  `MEDIAMTX_AUTH_SECRET` is generated once and kept in the cluster. Nothing secret is in the repo. The in-cluster
+  PostgreSQL uses the local-only `chzzk`/`chzzk` credentials.
+- **Look around** (context `kind-chzzk`, namespace `chzzk`):
+  ```sh
+  kubectl --context kind-chzzk -n chzzk get hpa backend          # CPU reading / target, replica count
+  kubectl --context kind-chzzk -n chzzk get pods -l app=backend   # backend pods
+  kubectl --context kind-chzzk -n chzzk logs deploy/backend       # one backend pod's log
+  ```
+  Every API response names the pod that served it in `X-Served-By`.
+
+| File | What |
+| --- | --- |
+| `deploy/kind-cluster.yaml` | Single node; host 8443 → nginx (NodePort 30443), UDP 8189 → MediaMTX (NodePort 30189) |
+| `deploy/k8s/10-postgres.yaml` | PostgreSQL StatefulSet + 2Gi PVC |
+| `deploy/k8s/20-mediamtx.yaml` | MediaMTX (1 replica, config from `mediamtx/mediamtx.yml`); auth callback → backend Service with the secret |
+| `deploy/k8s/30-backend.yaml` | Backend Deployment + Service + shared 10Gi 영상 PVC (`/var/lib/chzzk/vod`, every pod mounts it) |
+| `deploy/k8s/40-hpa.yaml` | HPA: CPU 50%, min 2, max 5, scale-down stabilization 60s |
+| `deploy/k8s/50-frontend.yaml` | nginx entry point (`frontend/Dockerfile`) |
+| `deploy/k8s/metrics-server/` | metrics-server v0.9.1 official manifest, plus `--kubelet-insecure-tls` for kind |
+
+Backend pods: CPU request 500m / limit 1, memory 512Mi / 768Mi, readiness and liveness on the actuator probes,
+preStop 5s + 20s graceful shutdown inside a 40s termination grace period.
 
 ## 라이브 on a phone (same Wi-Fi)
 

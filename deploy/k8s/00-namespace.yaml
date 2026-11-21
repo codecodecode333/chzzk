@@ -1,0 +1,7 @@
+# Everything of cluster mode lives in this namespace (except metrics-server, in kube-system).
+# The Secret "chzzk-env" (MEDIAMTX_AUTH_SECRET, LAN_IP, TOSS_* if set) is created by deploy/up.sh from .env, never
+# from a file in the repo.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chzzk

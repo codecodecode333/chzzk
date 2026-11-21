@@ -1,0 +1,64 @@
+# nginx entry point (frontend/Dockerfile): the SPA over HTTPS, /api -> backend Service, /live -> MediaMTX.
+# Host https://localhost:8443 -> kind node 30443 (deploy/kind-cluster.yaml) -> nginx 8443. Not autoscaled.
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: chzzk
+spec:
+  type: NodePort
+  selector:
+    app: frontend
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+      nodePort: 30443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: chzzk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: nginx
+          image: chzzk-frontend:cluster
+          imagePullPolicy: Never   # side-loaded by deploy/up.sh
+          env:
+            # Fully qualified: nginx's resolver doesn't apply the pod's DNS search domains.
+            - name: BACKEND_UPSTREAM
+              value: backend.chzzk.svc.cluster.local:8080
+            - name: MEDIAMTX_UPSTREAM
+              value: mediamtx.chzzk.svc.cluster.local:8889
+          ports:
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 32Mi
+            limits:
+              cpu: "1"
+              memory: 128Mi

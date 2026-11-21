@@ -1,0 +1,156 @@
+# Backend: 2..5 instances under the HPA (40-hpa.yaml). No state of its own (ADR-0005): sessions and records in
+# PostgreSQL, 영상 파일 on the shared PVC below (one node, so every pod mounts the same volume).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vod-files
+  namespace: chzzk
+spec:
+  # ReadWriteOnce = one node; all backend pods run on the single kind node, so they all share it.
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: chzzk
+spec:
+  # nginx opens a new connection per request, so kube-proxy spreads requests over the ready pods.
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: chzzk
+spec:
+  # The HPA owns the replica count; this is only the starting point.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      # Above the backend's graceful shutdown (preStop 5s + spring.lifecycle.timeout-per-shutdown-phase 20s).
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        # The image runs as 10001; the shared volume is group-writable by it.
+        fsGroup: 10001
+      initContainers:
+        # Start only once PostgreSQL accepts connections (Flyway runs at startup), instead of crash-looping.
+        - name: wait-for-postgres
+          image: chzzk-backend:cluster
+          imagePullPolicy: Never
+          command: ["bash", "-c", "until (exec 3<>/dev/tcp/postgres.chzzk.svc.cluster.local/5432) 2>/dev/null; do echo waiting for postgres; sleep 2; done"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        # kind's local-path volumes ignore fsGroup: hand the storage root to the app user once.
+        - name: vod-permissions
+          image: chzzk-backend:cluster
+          imagePullPolicy: Never
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command: ["sh", "-c", "chown 10001:10001 /var/lib/chzzk/vod && chmod 2775 /var/lib/chzzk/vod"]
+          volumeMounts:
+            - name: vod-files
+              mountPath: /var/lib/chzzk/vod
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: backend
+          image: chzzk-backend:cluster
+          imagePullPolicy: Never   # side-loaded by deploy/up.sh (kind load docker-image)
+          env:
+            - name: DB_URL
+              value: jdbc:postgresql://postgres.chzzk.svc.cluster.local:5432/chzzk
+            - name: DB_USERNAME
+              value: chzzk
+            - name: DB_PASSWORD
+              value: chzzk
+            - name: VOD_STORAGE_ROOT
+              value: /var/lib/chzzk/vod
+            - name: MEDIAMTX_API_URL
+              value: http://mediamtx.chzzk.svc.cluster.local:9997
+            - name: MEDIAMTX_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chzzk-env
+                  key: MEDIAMTX_AUTH_SECRET
+            - name: TOSS_CLIENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: chzzk-env
+                  key: TOSS_CLIENT_KEY
+                  optional: true   # unset: the backend's built-in test-key defaults
+            - name: TOSS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: chzzk-env
+                  key: TOSS_SECRET_KEY
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8080
+          # Slow first start on a shared CPU: the startup probe holds off liveness until the app is up.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 48
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            # Let the Service drop this pod from its endpoints before the app stops taking requests.
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            # The HPA's 50% target is relative to this request (spec: 500m).
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          volumeMounts:
+            - name: vod-files
+              mountPath: /var/lib/chzzk/vod
+      volumes:
+        - name: vod-files
+          persistentVolumeClaim:
+            claimName: vod-files

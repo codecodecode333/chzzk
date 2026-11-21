@@ -1,0 +1,24 @@
+# Backend autoscaling (ADR-0005): CPU utilization (of the 500m request) target 50%, 2..5 pods, scale-in settles
+# after 60s without load. Needs metrics-server (metrics-server/components.yaml).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend
+  namespace: chzzk
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60

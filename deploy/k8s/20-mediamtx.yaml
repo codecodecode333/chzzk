@@ -1,0 +1,104 @@
+# MediaMTX x1 (never scaled, ADR-0005): it holds the WebRTC connections. Config is mediamtx/mediamtx.yml (ConfigMap
+# "mediamtx-config", created by deploy/up.sh from that file); the env below overrides what differs from compose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mediamtx
+  namespace: chzzk
+spec:
+  # Cluster-internal: WHIP/WHEP signaling (nginx /live) and the control API (backend). Both unauthenticated or
+  # carrying the 송출 키, so never exposed outside the cluster.
+  selector:
+    app: mediamtx
+  ports:
+    - name: webrtc-http
+      port: 8889
+      targetPort: webrtc-http
+    - name: api
+      port: 9997
+      targetPort: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mediamtx-media
+  namespace: chzzk
+spec:
+  # WebRTC media only: host UDP 8189 -> kind node 30189 (deploy/kind-cluster.yaml) -> MediaMTX 8189.
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app: mediamtx
+  ports:
+    - name: webrtc-udp
+      protocol: UDP
+      port: 8189
+      targetPort: webrtc-udp
+      nodePort: 30189
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mediamtx
+  namespace: chzzk
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mediamtx
+  template:
+    metadata:
+      labels:
+        app: mediamtx
+    spec:
+      containers:
+        - name: mediamtx
+          image: bluenviron/mediamtx:1.21.3
+          args: ["/mediamtx.yml"]
+          env:
+            - name: LAN_IP
+              valueFrom:
+                secretKeyRef:
+                  name: chzzk-env
+                  key: LAN_IP
+            - name: MEDIAMTX_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chzzk-env
+                  key: MEDIAMTX_AUTH_SECRET
+            # Advertised WebRTC address (phones need the real LAN IP, README).
+            - name: MTX_WEBRTCADDITIONALHOSTS
+              value: "$(LAN_IP)"
+            # Auth callback to the backend Service with the shared secret (MediaMTX can't add headers).
+            - name: MTX_AUTHHTTPADDRESS
+              value: "http://backend.chzzk.svc.cluster.local:8080/internal/mediamtx/auth?secret=$(MEDIAMTX_AUTH_SECRET)"
+          ports:
+            - name: webrtc-http
+              containerPort: 8889
+            - name: webrtc-udp
+              containerPort: 8189
+              protocol: UDP
+            - name: api
+              containerPort: 9997
+          readinessProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /mediamtx.yml
+              subPath: mediamtx.yml
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: mediamtx-config

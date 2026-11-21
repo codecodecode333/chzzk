@@ -24,3 +24,6 @@ Thumbs.db
 .vscode/
 *.iml
 !.env.example
+
+# Cluster mode: downloaded tools (kind)
+deploy/.tools/
