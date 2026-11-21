@@ -2,8 +2,9 @@ package com.chzzk.broadcast;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.chzzk.common.job.AnotherInstanceRun;
-import com.chzzk.common.job.SingleInstanceJobs;
+import com.chzzk.common.job.JobLeases;
+import com.chzzk.common.job.JobRounds;
+import java.time.Duration;
 import com.chzzk.support.ApiSession;
 import java.time.Instant;
 import java.util.Base64;
@@ -59,7 +60,10 @@ class BroadcastApiTest {
     PublishingMonitor publishingMonitor;
 
     @Autowired
-    SingleInstanceJobs jobs;
+    JobLeases jobs;
+
+    /** The publishing monitor's interval (its default; the schedule itself is off here). */
+    static final Duration MONITOR_INTERVAL = Duration.ofSeconds(10);
 
     /** The shared secret MediaMTX sends on every auth callback (in the query of its {@code authHTTPAddress}). */
     static final String AUTH_SECRET = "test-auth-secret";
@@ -501,9 +505,10 @@ class BroadcastApiTest {
         }
     }
 
-    /** One run of the publishing monitor (normally every 10s) at the given moment. */
+    /** One round of the publishing monitor (normally every 10s) at the given moment, a full interval after the last. */
     void monitorChecksAt(Instant now) {
         clock.set(now);
+        JobRounds.intervalPasses(jdbc, PublishingMonitor.JOB);
         publishingMonitor.check();
     }
 
@@ -561,15 +566,16 @@ class BroadcastApiTest {
     }
 
     @Test
-    void aRoundAnotherInstanceIsRunningLeavesTheAutoEndToIt() throws Exception {
+    void aRoundAnotherInstanceAlreadyStartedLeavesTheAutoEndToIt() {
         Instant start = Instant.parse("2026-11-15T17:30:00Z");
         clock.set(start);
         long id = startedId("다른 인스턴스가 감시하는 방송");
 
-        try (var other = AnotherInstanceRun.midRound(jobs, PublishingMonitor.JOB)) {
-            monitorChecksAt(start.plusSeconds(61));
-            assertThat(detail(id).getBody()).as("this instance skipped the round").containsEntry("status", "LIVE");
-        }
+        JobRounds.anotherInstanceStartsARound(jobs, jdbc, PublishingMonitor.JOB, MONITOR_INTERVAL);
+        clock.set(start.plusSeconds(61));
+        publishingMonitor.check();
+        assertThat(detail(id).getBody()).as("this instance skipped the round").containsEntry("status", "LIVE");
+
         monitorChecksAt(start.plusSeconds(71));
 
         assertThat(detail(id).getBody()).containsEntry("status", "ENDED");
@@ -626,11 +632,13 @@ class BroadcastApiTest {
 
         // A restarted backend: a new publishing monitor over a media server that has never seen this 방송.
         FakeMediaServerGateway restartedMediaServer = new FakeMediaServerGateway();
-        PublishingMonitor restartedMonitor = new PublishingMonitor(restartedMediaServer, lifecycle, jobs);
+        PublishingMonitor restartedMonitor = new PublishingMonitor(restartedMediaServer, lifecycle, jobs, MONITOR_INTERVAL);
         clock.set(start.plusSeconds(70));
+        JobRounds.intervalPasses(jdbc, PublishingMonitor.JOB);
         restartedMonitor.check();
         assertThat(detail(id).getBody()).as("exactly 60s since its last media").containsEntry("status", "LIVE");
         clock.set(start.plusSeconds(80));
+        JobRounds.intervalPasses(jdbc, PublishingMonitor.JOB);
         restartedMonitor.check();
 
         assertThat(detail(id).getBody())
@@ -646,6 +654,7 @@ class BroadcastApiTest {
         for (int i = 0; i < 40; i++) ids.add(startedId("경쟁 " + i));
         mediaServer.reset();
         clock.set(start.plusSeconds(61)); // every one is due for the auto-end, and the 송출자 ends it now
+        JobRounds.intervalPasses(jdbc, PublishingMonitor.JOB);
 
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(9);
         java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);

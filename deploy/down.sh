@@ -4,8 +4,7 @@ set -euo pipefail
 
 CLUSTER="${CLUSTER:-chzzk}"
 here="$(cd "$(dirname "$0")" && pwd)"
-kind="$here/.tools/kind.exe"; [ -x "$kind" ] || kind="$here/.tools/kind"
-[ -x "$kind" ] || kind="$(command -v kind || true)"
-[ -n "$kind" ] || { echo "kind not found (run deploy/fetch-kind.sh)." >&2; exit 1; }
+. "$here/kind-path.sh"
+find_kind
 
 "$kind" delete cluster --name "$CLUSTER"

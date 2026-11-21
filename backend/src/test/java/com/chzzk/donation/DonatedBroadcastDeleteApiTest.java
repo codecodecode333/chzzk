@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.chzzk.broadcast.BroadcastTestConfig;
 import com.chzzk.broadcast.MutableClock;
+import com.chzzk.common.job.JobRounds;
 import com.chzzk.support.ApiSession;
 import java.time.Duration;
 import java.util.Map;
@@ -22,6 +23,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -53,6 +55,9 @@ class DonatedBroadcastDeleteApiTest {
 
     @Autowired
     DonationExpiryJob expiry;
+
+    @Autowired
+    JdbcTemplate jdbc;
 
     ApiSession owner;
     long broadcastId;
@@ -143,6 +148,7 @@ class DonatedBroadcastDeleteApiTest {
         Map<String, Object> expired = order(donor, broadcastId, 2_000);
         end();
         clock.advance(Duration.ofMinutes(31));
+        JobRounds.intervalPasses(jdbc, DonationExpiryJob.JOB);
         expiry.expire();
 
         ResponseEntity<Map<String, Object>> deleted = delete();

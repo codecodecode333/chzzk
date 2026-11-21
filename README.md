@@ -88,7 +88,7 @@ deploy/down.sh   # delete the cluster (database and 영상 파일 included)
 | `deploy/kind-cluster.yaml` | Single node; host 8443 → nginx (NodePort 30443), UDP 8189 → MediaMTX (NodePort 30189) |
 | `deploy/k8s/10-postgres.yaml` | PostgreSQL StatefulSet + 2Gi PVC |
 | `deploy/k8s/20-mediamtx.yaml` | MediaMTX (1 replica, config from `mediamtx/mediamtx.yml`); auth callback → backend Service with the secret |
-| `deploy/k8s/30-backend.yaml` | Backend Deployment + Service + shared 10Gi 영상 PVC (`/var/lib/chzzk/vod`, every pod mounts it) |
+| `deploy/k8s/30-backend.yaml` | Backend Deployment + Service + shared 10Gi 영상 파일 PVC (`/var/lib/chzzk/vod`, every pod mounts it) |
 | `deploy/k8s/40-hpa.yaml` | HPA: CPU 50%, min 2, max 5, scale-down stabilization 60s |
 | `deploy/k8s/50-frontend.yaml` | nginx entry point (`frontend/Dockerfile`) |
 | `deploy/k8s/metrics-server/` | metrics-server v0.9.1 official manifest, plus `--kubelet-insecure-tls` for kind |

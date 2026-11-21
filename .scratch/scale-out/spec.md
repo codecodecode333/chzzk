@@ -57,7 +57,7 @@
   - Spring Boot Actuator with only health exposed; liveness and readiness probe groups reachable without login; nothing else under actuator reachable.
   - Graceful shutdown with a bounded timeout; pod termination grace period exceeds it.
   - Every response carries `X-Served-By` with the instance name (pod hostname).
-  - Scheduled jobs (송출 감시, 후원 만료) run each round only on the instance that wins a PostgreSQL transaction-scoped advisory lock (one key per job); losers skip the round silently. No new dependency.
+  - Scheduled jobs (송출 감시, 후원 만료) run about once per interval across all instances: each round an instance first claims the job's lease in PostgreSQL (`job_lease`, last start older than ~90% of the interval, DB clock); the others skip the round silently. No new dependency.
   - Flyway already serializes concurrent migrations with its own lock; no change.
 - **Config & secrets:** a script builds a Kubernetes Secret from `.env` (MEDIAMTX_AUTH_SECRET, TOSS keys if present, LAN_IP), never committed. DB credentials for the in-cluster PostgreSQL are local-only defaults.
 - **Scripts:** cluster up (create cluster, build & load images, apply manifests, wait for ready) and down; k6 load test run through the `grafana/k6` Docker image against the HTTPS entry (ramp-up, ~3 min hold, stop), mixing public reads (방송 list, VOD list, 댓글); verification script holding one logged-in session and printing per-tick: time, `/api/members/me` result, 방송 count, 댓글 count, `X-Served-By`, current backend pod count.

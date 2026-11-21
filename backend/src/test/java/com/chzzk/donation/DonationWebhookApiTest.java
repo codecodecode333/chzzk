@@ -6,8 +6,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.chzzk.broadcast.BroadcastTestConfig;
 import com.chzzk.broadcast.MutableClock;
-import com.chzzk.common.job.AnotherInstanceRun;
-import com.chzzk.common.job.SingleInstanceJobs;
+import com.chzzk.common.job.JobLeases;
+import com.chzzk.common.job.JobRounds;
 import com.chzzk.donation.payment.PaymentStatus;
 import com.chzzk.support.ApiSession;
 import java.time.Duration;
@@ -61,7 +61,13 @@ class DonationWebhookApiTest {
     DonationExpiryJob expiry;
 
     @Autowired
-    SingleInstanceJobs jobs;
+    JobLeases jobs;
+
+    /** One round of the expiry sweep, a full interval after the last. */
+    void expiryRound() {
+        JobRounds.intervalPasses(jdbc, DonationExpiryJob.JOB);
+        expiry.expire();
+    }
 
     @BeforeEach
     void resetPayments() {
@@ -251,25 +257,25 @@ class DonationWebhookApiTest {
         Order o = order(1_000);
 
         clock.advance(Duration.ofMinutes(30));
-        expiry.expire();
+        expiryRound();
         assertThat(status(o.orderId())).isEqualTo("PENDING");
 
         clock.advance(Duration.ofSeconds(1));
-        expiry.expire();
+        expiryRound();
         assertThat(status(o.orderId())).isEqualTo("EXPIRED");
         assertThat(total(o.broadcastId())).isZero();
     }
 
     @Test
-    void aRoundAnotherInstanceIsRunningLeavesTheExpiryToIt() throws Exception {
+    void aRoundAnotherInstanceAlreadyStartedLeavesTheExpiryToIt() {
         Order o = order(1_000);
         clock.advance(Duration.ofMinutes(31));
 
-        try (var other = AnotherInstanceRun.midRound(jobs, DonationExpiryJob.JOB)) {
-            expiry.expire();
-            assertThat(status(o.orderId())).as("this instance skipped the round").isEqualTo("PENDING");
-        }
+        JobRounds.anotherInstanceStartsARound(jobs, jdbc, DonationExpiryJob.JOB, Duration.ofMinutes(1));
         expiry.expire();
+        assertThat(status(o.orderId())).as("this instance skipped the round").isEqualTo("PENDING");
+
+        expiryRound();
 
         assertThat(status(o.orderId())).isEqualTo("EXPIRED");
     }
@@ -282,7 +288,7 @@ class DonationWebhookApiTest {
         failed.donor().post("/api/donations/" + failed.orderId() + "/fail", Map.of("code", "PAY_PROCESS_CANCELED"));
 
         clock.advance(Duration.ofHours(1));
-        expiry.expire();
+        expiryRound();
 
         assertThat(status(confirmed.orderId())).isEqualTo("CONFIRMED");
         assertThat(status(failed.orderId())).isEqualTo("FAILED");
@@ -292,7 +298,7 @@ class DonationWebhookApiTest {
     void aLateWebhookShowingThePaymentDoneConfirmsAnExpiredOrder() {
         Order o = order(8_000);
         clock.advance(Duration.ofMinutes(31));
-        expiry.expire();
+        expiryRound();
         assertThat(status(o.orderId())).isEqualTo("EXPIRED");
         payments.approved("tgen_late", o.orderId(), 8_000);
 
@@ -306,7 +312,7 @@ class DonationWebhookApiTest {
     void aLateConfirmShowingThePaymentDoneConfirmsAnExpiredOrder() {
         Order o = order(9_000);
         clock.advance(Duration.ofMinutes(31));
-        expiry.expire();
+        expiryRound();
         assertThat(status(o.orderId())).isEqualTo("EXPIRED");
 
         ResponseEntity<Map<String, Object>> confirmed = confirm(o.donor(), approval(o.body(), "tgen_late_c", 9_000));
@@ -320,7 +326,7 @@ class DonationWebhookApiTest {
     void anExpiredOrderWhosePaymentIsNotDoneStaysExpired() {
         Order o = order(1_000);
         clock.advance(Duration.ofMinutes(31));
-        expiry.expire();
+        expiryRound();
         payments.holds("tgen_stale", o.orderId(), 1_000, PaymentStatus.EXPIRED);
 
         webhook(event("tgen_stale", o.orderId(), "DONE", 1_000));

@@ -32,8 +32,8 @@ metadata:
   name: backend
   namespace: chzzk
 spec:
-  # The HPA owns the replica count; this is only the starting point.
-  replicas: 2
+  # No replicas here: the HPA (40-hpa.yaml, minReplicas 2) owns the count, so re-applying this file doesn't reset it.
+  # A first create starts 1 pod and the HPA raises it to 2 right away.
   selector:
     matchLabels:
       app: backend

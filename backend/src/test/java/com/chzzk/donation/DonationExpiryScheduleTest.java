@@ -19,7 +19,7 @@ class DonationExpiryScheduleTest {
         final CountDownLatch runs = new CountDownLatch(2);
 
         CountingJob() {
-            super(null, null);
+            super(null, null, null);
         }
 
         @Override

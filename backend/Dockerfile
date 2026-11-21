@@ -19,8 +19,10 @@ RUN groupadd --system --gid 10001 chzzk \
     && mkdir -p /var/lib/chzzk/vod && chown -R chzzk:chzzk /var/lib/chzzk
 WORKDIR /app
 COPY --from=build /src/app.jar app.jar
+COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
 USER 10001:10001
 ENV VOD_STORAGE_ROOT=/var/lib/chzzk/vod \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# A small shell runs the JVM so a graceful stop (SIGTERM) ends with exit 0, not 143 (see the script).
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

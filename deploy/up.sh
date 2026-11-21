@@ -16,11 +16,8 @@ docker info > /dev/null 2>&1 || { echo "Docker is not running." >&2; exit 1; }
 command -v kubectl > /dev/null || { echo "kubectl not found (Docker Desktop ships one)." >&2; exit 1; }
 
 # kind: deploy/.tools (fetched and checksum-verified on first use), else one on PATH (e.g. winget install Kubernetes.kind).
-kind="$here/.tools/kind.exe"; [ -x "$kind" ] || kind="$here/.tools/kind"
-if [ ! -x "$kind" ]; then
-  if command -v kind > /dev/null; then kind="$(command -v kind)"
-  else step "Fetching kind"; "$here/fetch-kind.sh"; kind="$here/.tools/kind.exe"; [ -x "$kind" ] || kind="$here/.tools/kind"; fi
-fi
+. "$here/kind-path.sh"
+find_kind fetch
 
 if "$kind" get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
   step "Cluster $CLUSTER exists"

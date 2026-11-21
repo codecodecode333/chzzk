@@ -31,8 +31,8 @@ server {
 
     location /api/ {
         # The proxied URI is the client's raw one (not nginx's normalized $uri), so refuse dot segments that could
-        # climb out of /api on the backend (e.g. /api/../internal/...).
-        if ($request_uri ~* "(\.|%2e)(\.|%2e)") {
+        # climb out of /api on the backend (e.g. /api/../internal/...). Only the path part: the query may hold "..".
+        if ($request_uri ~* "^[^?]*(\.|%2e)(\.|%2e)") {
             return 400;
         }
         set $backend http://${BACKEND_UPSTREAM};
@@ -40,8 +40,6 @@ server {
         # so the Service spreads every request across the backend pods (new pods included) rather than pinning one.
         proxy_pass $backend;
         proxy_set_header Host $http_host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_request_buffering off;
         proxy_buffering off;
         proxy_read_timeout 1h;
@@ -58,8 +56,6 @@ server {
         absolute_redirect off;            # ...and leave it origin-rooted, not https://<server_name>:8443/live/...
         # A 401 without credentials carries a Basic challenge that would pop the browser's login dialog.
         proxy_hide_header WWW-Authenticate;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # The backend's /internal/** (MediaMTX auth callback) is cluster-internal only: never proxied, and not an SPA route.
