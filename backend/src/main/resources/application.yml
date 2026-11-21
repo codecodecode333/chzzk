@@ -21,11 +21,22 @@ spring:
     # tables (V3); the idle timeout comes from server.servlet.session.timeout.
     jdbc:
       initialize-schema: never
+  lifecycle:
+    # Bound on the graceful shutdown (server.shutdown): requests still running after this are cut off.
+    timeout-per-shutdown-phase: 20s
   autoconfigure:
     # No generated in-memory user: 회원 log in through the member module, not a UserDetailsService.
     exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 
+instance:
+  # Named in every response's X-Served-By (ServedByFilter). Kubernetes sets HOSTNAME to the pod name; blank falls back
+  # to this machine's host name.
+  name: ${HOSTNAME:}
+
 server:
+  # Scale-down (ADR-0005): stop taking requests, let in-flight ones finish for up to the timeout below, then stop.
+  # The pod's terminationGracePeriodSeconds must exceed it.
+  shutdown: graceful
   servlet:
     session:
       # 7 days without a request ends a login (Spring Session's idle timeout).
@@ -75,3 +86,20 @@ donation:
     secret-key: ${TOSS_SECRET_KEY:test_sk_zXLkKEypNArWmo50nX3lmeaxYG5R}
     api-url: ${TOSS_API_URL:https://api.tosspayments.com}
     allow-non-test-keys: ${TOSS_ALLOW_NON_TEST_KEYS:false}
+
+management:
+  # Only the health probes (ADR-0005): liveness and readiness for Kubernetes, open without login, no details.
+  # Every other actuator endpoint, and the /actuator index, answers 404.
+  endpoints:
+    access:
+      default: none
+    web:
+      exposure:
+        include: health
+      discovery:
+        enabled: false
+  endpoint:
+    health:
+      access: read-only
+      probes:
+        enabled: true

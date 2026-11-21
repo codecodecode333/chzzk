@@ -33,6 +33,21 @@ cd frontend && npm install && npm run dev   # https://localhost:5173 (self-signe
 and `VITE_VOD_MAX_FILE_SIZE` (frontend, same format, default `1GB`, read at `npm run dev`/`npm run build` time) to the
 same value. The form checks the size first; the server stays authoritative and answers `413` with the configured limit.
 
+### Backend container image
+
+```sh
+docker build -t chzzk-backend backend   # multi-stage: JDK 21 build, JRE 21 runtime, listens on 8080
+```
+
+Configured only by environment variables: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `VOD_STORAGE_ROOT` (image default
+`/var/lib/chzzk/vod`, writable by uid/gid 10001), `VOD_MAX_FILE_SIZE`, `MEDIAMTX_API_URL`, `MEDIAMTX_AUTH_SECRET`,
+`TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY`. Built for running as one of many instances (ADR-0005):
+
+- Health probes, open without login: `/actuator/health/liveness` and `/actuator/health/readiness`. Nothing else under
+  `/actuator` is reachable (`404`).
+- Every response carries `X-Served-By`: the instance name (`HOSTNAME`, the pod name in Kubernetes).
+- Graceful shutdown: in-flight requests get up to 20s to finish (`spring.lifecycle.timeout-per-shutdown-phase`).
+
 ## 라이브 on a phone (same Wi-Fi)
 
 The phone publishes and watches with WebRTC through MediaMTX (ADR-0002). Camera access needs HTTPS, so Vite serves a
