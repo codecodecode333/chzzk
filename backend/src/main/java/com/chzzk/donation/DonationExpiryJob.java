@@ -1,5 +1,6 @@
 package com.chzzk.donation;
 
+import com.chzzk.common.job.SingleInstanceJobs;
 import com.chzzk.donation.domain.DonationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,14 +16,22 @@ class DonationExpiryJob {
 
     private static final Logger log = LoggerFactory.getLogger(DonationExpiryJob.class);
 
-    private final DonationService donations;
+    /** The job's lock key: one instance runs each round. */
+    static final String JOB = "donation.expiry";
 
-    DonationExpiryJob(DonationService donations) {
+    private final DonationService donations;
+    private final SingleInstanceJobs jobs;
+
+    DonationExpiryJob(DonationService donations, SingleInstanceJobs jobs) {
         this.donations = donations;
+        this.jobs = jobs;
     }
 
+    /** One round of the sweep; skipped when another instance is running this round. */
     void expire() {
-        int expired = donations.expireStalePending();
-        if (expired > 0) log.info("Expired {} 후원 orders PENDING for over {}", expired, DonationService.EXPIRE_AFTER);
+        jobs.runIfWon(JOB, () -> {
+            int expired = donations.expireStalePending();
+            if (expired > 0) log.info("Expired {} 후원 orders PENDING for over {}", expired, DonationService.EXPIRE_AFTER);
+        });
     }
 }

@@ -2,6 +2,8 @@ package com.chzzk.broadcast;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.chzzk.common.job.AnotherInstanceRun;
+import com.chzzk.common.job.SingleInstanceJobs;
 import com.chzzk.support.ApiSession;
 import java.time.Instant;
 import java.util.Base64;
@@ -55,6 +57,9 @@ class BroadcastApiTest {
 
     @Autowired
     PublishingMonitor publishingMonitor;
+
+    @Autowired
+    SingleInstanceJobs jobs;
 
     /** The shared secret MediaMTX sends on every auth callback (in the query of its {@code authHTTPAddress}). */
     static final String AUTH_SECRET = "test-auth-secret";
@@ -556,6 +561,21 @@ class BroadcastApiTest {
     }
 
     @Test
+    void aRoundAnotherInstanceIsRunningLeavesTheAutoEndToIt() throws Exception {
+        Instant start = Instant.parse("2026-11-15T17:30:00Z");
+        clock.set(start);
+        long id = startedId("다른 인스턴스가 감시하는 방송");
+
+        try (var other = AnotherInstanceRun.midRound(jobs, PublishingMonitor.JOB)) {
+            monitorChecksAt(start.plusSeconds(61));
+            assertThat(detail(id).getBody()).as("this instance skipped the round").containsEntry("status", "LIVE");
+        }
+        monitorChecksAt(start.plusSeconds(71));
+
+        assertThat(detail(id).getBody()).containsEntry("status", "ENDED");
+    }
+
+    @Test
     void nothingEndsWhileTheMediaServerCannotBeAsked() {
         Instant start = Instant.parse("2026-11-15T18:00:00Z");
         clock.set(start);
@@ -606,7 +626,7 @@ class BroadcastApiTest {
 
         // A restarted backend: a new publishing monitor over a media server that has never seen this 방송.
         FakeMediaServerGateway restartedMediaServer = new FakeMediaServerGateway();
-        PublishingMonitor restartedMonitor = new PublishingMonitor(restartedMediaServer, lifecycle);
+        PublishingMonitor restartedMonitor = new PublishingMonitor(restartedMediaServer, lifecycle, jobs);
         clock.set(start.plusSeconds(70));
         restartedMonitor.check();
         assertThat(detail(id).getBody()).as("exactly 60s since its last media").containsEntry("status", "LIVE");
