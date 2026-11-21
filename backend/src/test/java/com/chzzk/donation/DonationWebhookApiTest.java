@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.chzzk.broadcast.BroadcastTestConfig;
 import com.chzzk.broadcast.MutableClock;
+import com.chzzk.common.job.AnotherInstanceRun;
+import com.chzzk.common.job.SingleInstanceJobs;
 import com.chzzk.donation.payment.PaymentStatus;
 import com.chzzk.support.ApiSession;
 import java.time.Duration;
@@ -57,6 +59,9 @@ class DonationWebhookApiTest {
 
     @Autowired
     DonationExpiryJob expiry;
+
+    @Autowired
+    SingleInstanceJobs jobs;
 
     @BeforeEach
     void resetPayments() {
@@ -253,6 +258,20 @@ class DonationWebhookApiTest {
         expiry.expire();
         assertThat(status(o.orderId())).isEqualTo("EXPIRED");
         assertThat(total(o.broadcastId())).isZero();
+    }
+
+    @Test
+    void aRoundAnotherInstanceIsRunningLeavesTheExpiryToIt() throws Exception {
+        Order o = order(1_000);
+        clock.advance(Duration.ofMinutes(31));
+
+        try (var other = AnotherInstanceRun.midRound(jobs, DonationExpiryJob.JOB)) {
+            expiry.expire();
+            assertThat(status(o.orderId())).as("this instance skipped the round").isEqualTo("PENDING");
+        }
+        expiry.expire();
+
+        assertThat(status(o.orderId())).isEqualTo("EXPIRED");
     }
 
     @Test
