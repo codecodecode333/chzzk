@@ -1,6 +1,6 @@
 # 스펙: 로컬 클러스터에서 여러 인스턴스로 띄우고 부하에 따라 자동 확장
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 ## Problem Statement
 

@@ -4,14 +4,14 @@
 
 **Blocked by:** None - can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A multi-stage container build (node build → nginx) of the frontend
-- [ ] HTTPS on one port with a self-signed certificate; client-route fallback to `index.html`
-- [ ] `/api` → backend upstream without pinning long-lived connections to one pod (new pods get traffic); `/live` rewrites as the Vite proxy; `/internal/**` not proxied (`404`)
-- [ ] Upload body limit ≥ the VOD max file size; long upload/playback requests not cut by proxy timeouts
-- [ ] Smoke-checked with `docker run` against a locally running backend (documented in the ticket notes)
-- [ ] Frontend source and Vite config unchanged
+- [x] A multi-stage container build (node build → nginx) of the frontend
+- [x] HTTPS on one port with a self-signed certificate; client-route fallback to `index.html`
+- [x] `/api` → backend upstream without pinning long-lived connections to one pod (new pods get traffic); `/live` rewrites as the Vite proxy; `/internal/**` not proxied (`404`)
+- [x] Upload body limit ≥ the VOD max file size; long upload/playback requests not cut by proxy timeouts
+- [x] Smoke-checked with `docker run` against a locally running backend (documented in the ticket notes)
+- [x] Frontend source and Vite config unchanged
 
 ## Notes
 

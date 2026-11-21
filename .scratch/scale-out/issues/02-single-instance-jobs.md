@@ -4,9 +4,9 @@
 
 **Blocked by:** None - can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A small shared helper runs a job body only when its lease is claimed; no new dependency; the broadcast and donation modules don't import each other
-- [ ] 송출 감시 and 후원 만료 both go through it, each with its own key
-- [ ] Seam tests on the Testcontainers DB: two concurrent runs of the same job → exactly one runs the body; sequential runs both run; two different jobs don't block each other
-- [ ] Existing broadcast auto-end and donation expiry tests still pass
+- [x] A small shared helper runs a job body only when its lease is claimed; no new dependency; the broadcast and donation modules don't import each other
+- [x] 송출 감시 and 후원 만료 both go through it, each with its own key
+- [x] Seam tests on the Testcontainers DB: two concurrent runs of the same job → exactly one runs the body; sequential runs both run; two different jobs don't block each other
+- [x] Existing broadcast auto-end and donation expiry tests still pass

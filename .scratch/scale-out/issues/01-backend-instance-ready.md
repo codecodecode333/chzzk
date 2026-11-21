@@ -4,12 +4,12 @@
 
 **Blocked by:** None - can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A multi-stage container build produces a Java 21 runtime image of the backend; the build works from a clean checkout and is documented in one command
-- [ ] Actuator health only: liveness and readiness groups answer `200` without login; other actuator paths are not reachable (`404`/`401`)
-- [ ] Graceful shutdown enabled with a bounded timeout
-- [ ] Every response (public, authenticated, error) carries `X-Served-By` = the instance's hostname
-- [ ] The VOD storage root, DB URL, MediaMTX API URL and auth secret, and Toss keys stay configurable by environment variable (no change of defaults for dev mode)
-- [ ] HTTP API seam tests cover the header and the health/actuator exposure
-- [ ] The dev flow (bootRun + compose + Vite) is unchanged
+- [x] A multi-stage container build produces a Java 21 runtime image of the backend; the build works from a clean checkout and is documented in one command
+- [x] Actuator health only: liveness and readiness groups answer `200` without login; other actuator paths are not reachable (`404`/`401`)
+- [x] Graceful shutdown enabled with a bounded timeout
+- [x] Every response (public, authenticated, error) carries `X-Served-By` = the instance's hostname
+- [x] The VOD storage root, DB URL, MediaMTX API URL and auth secret, and Toss keys stay configurable by environment variable (no change of defaults for dev mode)
+- [x] HTTP API seam tests cover the header and the health/actuator exposure
+- [x] The dev flow (bootRun + compose + Vite) is unchanged
