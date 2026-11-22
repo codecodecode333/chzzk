@@ -353,7 +353,8 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK']) {
 
 try {
   await launch();
-  await startBroadcast();
+  if (!stopping) await startBroadcast();
+  if (stopping) throw new Error('stopped before going on air'); // a 방송 started meanwhile is still ended below
   log(`방송 ${broadcastId} 방송 중: "${TITLE}" — ${BASE}/broadcasts/${broadcastId}`);
   console.log(`BROADCAST_ID=${broadcastId}`);
   if (opts.watch) await watch();

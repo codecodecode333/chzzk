@@ -257,8 +257,13 @@ the 방송 is in the 방송 중 list and that its video plays: `currentTime` adv
 certificate; never needed on the public site), `--browser <path>` (or `BROWSER`), `--headed`. The line
 `BROADCAST_ID=<id>` is printed for other scripts. If this 회원 already has a 방송 중 방송, it is ended first
 ("새 방송으로 시작"). A dropped 송출 is retried with the screen's "다시 연결". Exit code 0 only if the 방송 started and
-ended cleanly (and, with `--watch`, played). If the script is killed outright, the server auto-ends the 방송 about 70s
+ended cleanly (and, with `--watch`, played). The browser runs in its own process group so Ctrl+C reaches only the
+script, which ends the 방송 and then closes it; if the script is killed outright, the headless browser keeps 송출 until
+you close it (the next run with the same `--email` ends that 방송 first), and the server auto-ends the 방송 about 70s
 after media stops.
+
+Verified 2026-11-23 against the local dev stack (Chrome and Edge, Windows 10): the 시청자 page found the 방송 in the
+방송 중 list and played 1280x720 video (`currentTime` +3s over 3s); Ctrl+C and `--duration` both ended it via 방송 종료.
 
 ### Real-phone checklist
 
