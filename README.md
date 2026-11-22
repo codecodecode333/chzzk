@@ -49,6 +49,40 @@ Configured only by environment variables: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`
   `/actuator` is reachable (`404`).
 - Every response carries `X-Served-By`: the instance name (`HOSTNAME`, the pod name in Kubernetes).
 - Graceful shutdown: in-flight requests get up to 20s to finish (`spring.lifecycle.timeout-per-shutdown-phase`).
+- Public overall health, open without login: `/healthz` (on the main port) answers only `{"status":"UP"}` (`200`) or
+  `{"status":"DOWN"}` (`503`), with every health contributor, the database included, and no details. Liveness and
+  readiness stay as above.
+
+### `prod` profile (공개 배포)
+
+For running behind the public HTTPS proxy (Caddy, ADR-0006), start the backend with `SPRING_PROFILES_ACTIVE=prod`
+(`backend/src/main/resources/application-prod.yml`). Dev runs without it and keeps every default above. In `prod`:
+
+- The login `SESSION` cookie is `Secure` (HTTPS only), still HttpOnly and SameSite=Lax.
+- `X-Forwarded-Proto/-For/-Host` are trusted (`server.forward-headers-strategy=native`; Tomcat accepts them only from
+  private and loopback addresses, i.e. the proxy on the Compose network), so a request that reached Caddy over HTTPS
+  counts as secure (the `XSRF-TOKEN` cookie becomes `Secure` too).
+- Toss success/fail redirects are absolute URLs on `PUBLIC_BASE_URL` (in dev they are paths on the page's origin).
+- Required settings come only from the environment, with no defaults. The server refuses to start, naming the variable,
+  when any is missing or blank:
+
+| Variable | Required in `prod` | What |
+| --- | --- | --- |
+| `SPRING_PROFILES_ACTIVE` | `prod` | Turns the profile on |
+| `PUBLIC_BASE_URL` | yes, `https://…` | The public site address without trailing slash, e.g. `https://live.codecodecode333.dev` |
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | yes | PostgreSQL, e.g. `jdbc:postgresql://postgres:5432/chzzk` |
+| `MEDIAMTX_AUTH_SECRET` | yes | Shared secret of MediaMTX's auth callback (the same value MediaMTX gets) |
+| `MEDIAMTX_API_URL` | no (`http://localhost:9997`) | MediaMTX control API, e.g. `http://mediamtx:9997` in Compose |
+| `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` | no | Your Toss **test** keys; ADR-0004's rule still refuses non-`test_` keys (see 후원) |
+| `DESKTOP_APP_ORIGIN` | no (`app://chzzk`) | The 데스크톱 앱's origin, the only one given CORS (below) |
+| `VOD_STORAGE_ROOT`, `VOD_MAX_FILE_SIZE` | no | As above |
+
+CORS (ADR-0006, dev and prod alike): only the 데스크톱 앱's origin (`DESKTOP_APP_ORIGIN`, default `app://chzzk`, the
+app's custom protocol origin) may preflight and `GET` the public 방송 list `/api/broadcasts` and detail
+`/api/broadcasts/{id}`, without credentials (`Access-Control-Allow-Origin: app://chzzk`, no
+`Access-Control-Allow-Credentials`). Every other origin, endpoint and method gets no CORS headers; a non-`GET` from
+the app's origin to those two paths is refused (`403`). If the 데스크톱 앱 changes its scheme or host, set
+`DESKTOP_APP_ORIGIN` to match.
 
 ## 클러스터 모드 (자동 확장)
 

@@ -1,0 +1,26 @@
+# The prod profile (SPRING_PROFILES_ACTIVE=prod): the backend behind the public HTTPS proxy (Caddy, ADR-0006).
+# Everything here overrides application.yml; dev defaults stay there. Secrets and addresses come only from the
+# environment, with no defaults: a missing or blank one stops the server at startup (RequiredProdSettings). The Toss
+# keys keep application.yml's defaults and ADR-0004's test-key rule (TossKeys).
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+server:
+  # Trust X-Forwarded-Proto/-For/-Host from the proxy (Tomcat's RemoteIpValve, which only accepts them from private
+  # and loopback addresses such as the Compose network), so a request that reached Caddy over HTTPS counts as secure.
+  forward-headers-strategy: native
+  servlet:
+    session:
+      cookie:
+        # The login cookie only ever travels over HTTPS.
+        secure: true
+
+site:
+  public-base-url: ${PUBLIC_BASE_URL}
+
+broadcast:
+  media-server:
+    auth-secret: ${MEDIAMTX_AUTH_SECRET}

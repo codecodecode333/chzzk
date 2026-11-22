@@ -28,6 +28,17 @@ spring:
     # No generated in-memory user: 회원 log in through the member module, not a UserDetailsService.
     exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 
+site:
+  # The public address the site is served from (e.g. https://live.codecodecode333.dev), with no trailing slash. Toss
+  # redirects back to it after a 후원 payment. Blank (dev): the redirects are paths on whatever origin the browser is
+  # on. Required in the prod profile.
+  public-base-url: ${PUBLIC_BASE_URL:}
+
+desktop-app:
+  # The 데스크톱 앱's own origin (its custom app protocol, ADR-0006). Only this origin gets CORS, and only for GET on
+  # the public 방송 list and detail (DesktopAppCors).
+  origin: ${DESKTOP_APP_ORIGIN:app://chzzk}
+
 instance:
   # Named in every response's X-Served-By (ServedByFilter). Kubernetes sets HOSTNAME to the pod name; blank falls back
   # to this machine's host name.
@@ -103,3 +114,13 @@ management:
       access: read-only
       probes:
         enabled: true
+      show-details: never
+      show-components: never
+      group:
+        # The public overall health (ADR-0006): every contributor, the database included, answering only UP or DOWN
+        # (503) at /healthz on the main port, without login.
+        public:
+          include: "*"
+          show-details: never
+          show-components: never
+          additional-path: "server:/healthz"
