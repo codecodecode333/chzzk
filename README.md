@@ -11,6 +11,7 @@
 | `compose.yaml` | Local PostgreSQL and MediaMTX (backend and frontend run natively) |
 | `deploy/` | Cluster mode: kind config, Kubernetes manifests, up/down scripts (see 클러스터 모드) |
 | `load/` | 클러스터 모드 부하(k6)와 유지 확인 스크립트, 실제 실행 기록 `load/results/` |
+| `scripts/test-broadcast.mjs` | 테스트 방송: headless browser with a fake camera puts a 방송 on air (see 라이브) |
 | `mediamtx/mediamtx.yml` | MediaMTX config: WebRTC only, auth via the backend's internal callback (ADR-0002) |
 
 ## Prerequisites
@@ -232,6 +233,32 @@ session. The backend reads MediaMTX's control API on `localhost:9997` (override 
 Every 10s the publishing monitor asks that API which 방송 are receiving media; a 방송 중 방송 with no media for
 over 60s (or that never sent any) is ended automatically. While MediaMTX can't be asked, only 방송 that never sent
 any media are ended (for the others, silence can't be told from the outage).
+
+### 테스트 방송 (no phone)
+
+`scripts/test-broadcast.mjs` puts a 방송 on air from a headless Chrome or Edge (whichever is installed) with a fake
+camera and microphone (a test pattern and a beep). It logs a test 회원 in (signing up when the login is refused),
+starts the 방송 through the 송출 screen itself (`/broadcasts/new`: title → 방송 시작, WHIP 송출), prints the 방송 id and
+keeps 송출 until Ctrl+C or `--duration`; on exit it presses 방송 종료. Node 22+ only, no npm install: it drives the
+browser over the DevTools protocol with Node's built-in WebSocket.
+
+```sh
+# Local dev stack (self-signed certificate: --insecure); a fresh throwaway 회원, until Ctrl+C
+node scripts/test-broadcast.mjs --base-url https://localhost:5173 --insecure
+
+# Public site, a fixed test 회원, 10 minutes, and check it as a logged-out 시청자 too
+TEST_BROADCAST_PASSWORD=... node scripts/test-broadcast.mjs --base-url https://live.codecodecode333.dev \
+  --email test-broadcast@example.com --duration 600 --watch
+```
+
+Options: `--email`/`--password` (or `TEST_BROADCAST_PASSWORD`)/`--nickname` for the 회원 (without `--email` a new
+throwaway 회원 is signed up each run), `--title`, `--duration <s>`, `--watch` (a second, logged-out page checks that
+the 방송 is in the 방송 중 list and that its video plays: `currentTime` advances), `--insecure` (accept a self-signed
+certificate; never needed on the public site), `--browser <path>` (or `BROWSER`), `--headed`. The line
+`BROADCAST_ID=<id>` is printed for other scripts. If this 회원 already has a 방송 중 방송, it is ended first
+("새 방송으로 시작"). A dropped 송출 is retried with the screen's "다시 연결". Exit code 0 only if the 방송 started and
+ended cleanly (and, with `--watch`, played). If the script is killed outright, the server auto-ends the 방송 about 70s
+after media stops.
 
 ### Real-phone checklist
 
