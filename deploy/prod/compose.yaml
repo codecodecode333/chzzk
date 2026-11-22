@@ -1,0 +1,95 @@
+# Production stack (ADR-0006): the whole service on one host, from deploy/prod/.env (see .env.example and README,
+# 공개 배포). Images are built here from the checkout, so this works on the ARM64 VM without a registry.
+#
+#   docker compose -f deploy/prod/compose.yaml up --build -d      (deploy/prod/deploy.sh does this on the VM)
+#
+# Only Caddy (80/443) and MediaMTX's WebRTC media port (8189 udp+tcp) are published; PostgreSQL, the backend and
+# MediaMTX's signaling/control ports stay on the Compose network. Data lives in named volumes.
+name: chzzk
+
+services:
+  caddy:
+    build:
+      context: caddy
+      additional_contexts:
+        frontend: ../../frontend   # the SPA is built into the Caddy image (caddy/Dockerfile)
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - mediamtx
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST in deploy/prod/.env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Which tls snippet the Caddyfile imports: Let's Encrypt (with the e-mail when one is set), or `internal` for a
+      # local check (compose.local.yaml).
+      CADDY_TLS: ${CADDY_TLS:-acme${ACME_EMAIL:+_email}}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data       # certificates and ACME account: keep them, or Let's Encrypt rate limits bite
+      - caddy-config:/config
+
+  backend:
+    build: ../../backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://${PUBLIC_HOST}}
+      DB_URL: jdbc:postgresql://postgres:5432/chzzk
+      DB_USERNAME: chzzk
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/prod/.env}
+      MEDIAMTX_AUTH_SECRET: ${MEDIAMTX_AUTH_SECRET:?set MEDIAMTX_AUTH_SECRET in deploy/prod/.env}
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      DESKTOP_APP_ORIGIN: ${DESKTOP_APP_ORIGIN:-app://chzzk}
+      # Toss test keys (ADR-0004), passed through only when .env sets them; unset, application.yml's defaults apply
+      # (an empty value would not fall back, so don't leave them as `KEY=` in .env).
+      TOSS_CLIENT_KEY:
+      TOSS_SECRET_KEY:
+    volumes:
+      - vod-data:/var/lib/chzzk/vod   # VOD_STORAGE_ROOT in the image; the volume starts out owned by uid 10001
+
+  postgres:
+    image: postgres:16.11-alpine3.22
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chzzk
+      POSTGRES_USER: chzzk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/prod/.env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "chzzk", "-d", "chzzk"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # WebRTC relay for 라이브 (ADR-0002). Same config file as dev; the environment overrides the host-specific parts.
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.3
+    restart: unless-stopped
+    command: ["/mediamtx.yml"]
+    volumes:
+      - ../../mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    environment:
+      # Media candidates point at the VM's public IP (the container's own address is never advertised).
+      MTX_WEBRTCADDITIONALHOSTS: ${PUBLIC_IP:?set PUBLIC_IP in deploy/prod/.env}
+      # ICE over TCP too, for networks that block UDP.
+      MTX_WEBRTCLOCALTCPADDRESS: ":8189"
+      # The backend refuses auth callbacks without the shared secret; MediaMTX can't add headers, so it is in the query.
+      MTX_AUTHHTTPADDRESS: http://backend:8080/internal/mediamtx/auth?secret=${MEDIAMTX_AUTH_SECRET:?set MEDIAMTX_AUTH_SECRET in deploy/prod/.env}
+      # CORS for the 데스크톱 앱's WHEP playback. MediaMTX can't scope it to WHEP, so Caddy strips it from WHIP.
+      MTX_WEBRTCALLOWORIGINS: ${DESKTOP_APP_ORIGIN:-app://chzzk}
+    ports:
+      - "8189:8189/udp"   # WebRTC media (encrypted by WebRTC itself)
+      - "8189:8189/tcp"
+    # WHIP/WHEP signaling (8889) is reached only through Caddy (/live); the control API (9997) only by the backend.
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  vod-data:

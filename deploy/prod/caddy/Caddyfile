@@ -1,0 +1,98 @@
+# Production entry point (ADR-0006). The site address is PUBLIC_HOST (e.g. live.codecodecode333.dev): Caddy gets and
+# renews its Let's Encrypt certificate and redirects HTTP to HTTPS on its own. Routes mirror frontend/nginx (cluster
+# mode) and the Vite dev proxy.
+{
+	servers {
+		timeouts {
+			# A VOD upload is one long request body; give slow uplinks time (responses have no write timeout).
+			read_body 1h
+		}
+	}
+}
+
+# CADDY_TLS (set by compose.yaml): acme, acme_email (ACME_EMAIL as the account e-mail) or internal (Caddy's own CA,
+# for a local check only).
+(tls_acme) {
+}
+(tls_acme_email) {
+	tls {$ACME_EMAIL}
+}
+(tls_internal) {
+	tls internal
+}
+
+{$PUBLIC_HOST} {
+	import tls_{$CADDY_TLS}
+
+	# One HSTS header on every response (`>` replaces the backend's own Spring Security one instead of adding a second).
+	header >Strict-Transport-Security "max-age=31536000"
+	header -Server
+
+	# `route` keeps these in the written order: first match wins.
+	route {
+		# Overall health from the backend: {"status":"UP"} or {"status":"DOWN"} only.
+		handle /healthz {
+			reverse_proxy backend:8080
+		}
+
+		# Toss's payment webhook is the one /internal path meant for the internet (see README, 후원). The rest of
+		# /internal (MediaMTX's auth callback) is for the Compose network only. Paths are matched after cleaning,
+		# so /api/../internal/... lands here too.
+		@paymentWebhook {
+			path /internal/payments/webhook
+			method POST
+		}
+		handle @paymentWebhook {
+			request_body {
+				max_size 64KB
+			}
+			reverse_proxy backend:8080
+		}
+		@internal path /internal /internal/*
+		handle @internal {
+			respond 404
+		}
+
+		handle /api/* {
+			# >= the backend's VOD max file size (1GB) plus multipart overhead; streamed, not buffered.
+			request_body {
+				max_size 1100MB
+			}
+			reverse_proxy backend:8080 {
+				# Stream responses as they come (progressive MP4 with Range), no read/write timeouts on either side.
+				flush_interval -1
+			}
+		}
+
+		# WHIP/WHEP signaling to MediaMTX on the page's own origin, as the nginx /live/ location does.
+		@whip path_regexp ^/live/broadcasts/[0-9]+/whip(/|$)
+		handle /live/* {
+			# MediaMTX's CORS (the 데스크톱 앱's origin) is meant for WHEP playback only: drop it from 송출 requests.
+			header @whip -Access-Control-Allow-Origin
+			uri strip_prefix /live
+			reverse_proxy mediamtx:8889 {
+				header_up Host {upstream_hostport}
+				# MediaMTX answers with an origin-rooted session Location; keep it under /live so DELETE reaches it.
+				header_down Location ^/(.*)$ /live/$1
+				# A 401's Basic challenge would pop the browser's login dialog.
+				header_down -WWW-Authenticate
+			}
+		}
+
+		# Hashed build output: a missing file is a real 404, not the SPA.
+		handle /assets/* {
+			root * /srv
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		# Client routes (/, /vods/1, /download, ...) fall back to the SPA shell.
+		handle {
+			root * /srv
+			encode zstd gzip
+			header Cache-Control "no-cache"
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}
