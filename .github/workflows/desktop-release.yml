@@ -1,0 +1,87 @@
+# Builds the 데스크톱 앱 (desktop/) and publishes it to the GitHub Release of the pushed tag (ADR-0006).
+#   git tag v0.1.0 && git push origin v0.1.0   -> Windows x64 NSIS installer + macOS universal dmg on Release v0.1.0
+#   Actions -> desktop-release -> Run workflow -> dry build of both targets, nothing published
+# File names are fixed, so https://github.com/codecodecode333/chzzk/releases/latest/download/<name> (the web /download
+# page) always serves the newest Release. The tag must equal desktop/package.json's version with a leading "v".
+name: desktop-release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+            file: chzzk-desktop-setup-x64.exe
+          - os: macos-latest
+            script: dist:mac
+            file: chzzk-desktop-mac-universal.dmg
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # gh release create/upload
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    env:
+      # Unsigned builds: never look for a signing identity in the runner's keychain.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.3'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Check the tag matches desktop/package.json
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$version" ]; then
+            echo "::error::tag $TAG does not match desktop/package.json version $version"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Build ${{ matrix.file }}
+        run: npm run ${{ matrix.script }}
+
+      - name: Check the output
+        run: ls -l "release/${{ matrix.file }}"
+
+      - name: Upload to the Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Both matrix jobs get here; whichever is first creates the Release, the other finds it.
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "데스크톱 앱 $TAG" \
+              --notes "치지직 데스크톱 앱 $TAG (시청 전용, 서명 없음). 설치 방법: https://live.codecodecode333.dev/download" \
+              || gh release view "$TAG" > /dev/null
+          fi
+          gh release upload "$TAG" "release/${{ matrix.file }}" --clobber

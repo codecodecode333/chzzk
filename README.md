@@ -415,6 +415,18 @@ npm run dist:win    # release/chzzk-desktop-setup-x64.exe   (Windows x64 NSIS, p
 npm run dist:mac    # release/chzzk-desktop-mac-universal.dmg (arm64 + x64, unsigned; must run on macOS)
 ```
 
+**Release.** `.github/workflows/desktop-release.yml` builds both files on `windows-latest` / `macos-latest` and
+uploads them to the GitHub Release of a pushed `v*` tag with the names above, so
+`https://github.com/codecodecode333/chzzk/releases/latest/download/<name>` always serves the newest build. The tag
+must be `v` + `desktop/package.json`'s version; bump that and `DESKTOP_VERSION` in
+`frontend/src/download/desktopRelease.ts` together (a frontend test checks they match). Running the workflow by hand
+(workflow_dispatch) is a dry build that publishes nothing. The web `/download` page (top menu "데스크톱 앱") links to
+these files with the install steps and the SmartScreen/Gatekeeper workarounds.
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 Settings (first match wins):
 
 | What | How |

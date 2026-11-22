@@ -89,7 +89,7 @@ export function DownloadPage() {
           ]}
           steps={[
             '설치 프로그램(chzzk-desktop-setup-x64.exe)을 내려받아 실행합니다.',
-            '설치가 끝나면 시작 메뉴나 바탕 화면의 Chzzk를 실행합니다.',
+            '설치가 끝나면 시작 메뉴나 바탕 화면의 "치지직"을 실행합니다.',
           ]}
           warning={{
             title: 'SmartScreen 경고가 뜨면',
