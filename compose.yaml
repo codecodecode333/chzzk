@@ -19,6 +19,8 @@ services:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
     environment:
       MTX_WEBRTCADDITIONALHOSTS: ${LAN_IP:-127.0.0.1}  # phones need the real LAN IP (README)
+      # The 데스크톱 앱 (origin app://chzzk) plays WHEP cross-origin; browsers use the same-origin /live proxy.
+      MTX_WEBRTCALLOWORIGINS: ${DESKTOP_APP_ORIGIN:-app://chzzk}
       # The backend refuses auth callbacks that don't carry this shared secret (README). MediaMTX can't add headers,
       # so it goes in the callback URL's query.
       MTX_AUTHHTTPADDRESS: http://host.docker.internal:8080/internal/mediamtx/auth?secret=${MEDIAMTX_AUTH_SECRET:-}

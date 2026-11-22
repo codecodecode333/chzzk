@@ -8,6 +8,7 @@
 | --- | --- |
 | `backend/` | Spring Boot 3 (Java 21, Gradle Kotlin DSL), Flyway, PostgreSQL |
 | `frontend/` | React + Vite + TypeScript + Tailwind CSS |
+| `desktop/` | 데스크톱 앱: Electron + electron-builder, React + Vite + TypeScript renderer (see 데스크톱 앱) |
 | `compose.yaml` | Local PostgreSQL and MediaMTX (backend and frontend run natively) |
 | `deploy/` | Cluster mode: kind config, Kubernetes manifests, up/down scripts (see 클러스터 모드) |
 | `load/` | 클러스터 모드 부하(k6)와 유지 확인 스크립트, 실제 실행 기록 `load/results/` |
@@ -337,6 +338,53 @@ calling 라이브 done (ticket 07). Use two phones and a desktop browser; "list"
 - [ ] Kill the 송출 tab (close it, or lock the phone): within about 70s the 방송 shows 종료 in the list and
       "종료된 방송입니다" for the 시청자.
 
+## 데스크톱 앱 (`desktop/`)
+
+A 시청-only Electron app (ADR-0006): the 방송 list (방송 중 first, recent 종료 shown as 종료 and not playable,
+refreshed every 10s) and the 시청 screen (WHEP playback; "방송이 종료되었습니다" once the 5s status check or a dropped
+connection finds the 방송 종료). While the backend can't be reached both screens say "서버에 연결할 수 없습니다" and keep
+retrying. No login, 댓글, 후원 or VOD. The React renderer is bundled into the app and served from the custom protocol
+origin **`app://chzzk`** (registered standard + secure, so fetch and WebRTC work as on an HTTPS page); every backend
+call is a cross-origin `GET <backend>/api/broadcasts[/{id}]` and WHEP goes to `<backend>/live/.../whep`, both without
+credentials. The backend (`DESKTOP_APP_ORIGIN`) and MediaMTX (`webrtcAllowOrigins`) allow only that origin.
+`contextIsolation` on, `nodeIntegration` off, sandboxed preload; the renderer only sees `window.chzzk.backendUrl`.
+
+```sh
+cd desktop && npm ci
+npm test            # renderer: Vitest + Testing Library + MSW (happy-dom), media module faked
+npm run lint        # oxlint
+npm start           # build the renderer, then run Electron against the configured backend
+npm run dist:win    # release/chzzk-desktop-setup-x64.exe   (Windows x64 NSIS, per-user, unsigned; `/S` = silent)
+npm run dist:mac    # release/chzzk-desktop-mac-universal.dmg (arm64 + x64, unsigned; must run on macOS)
+```
+
+Settings (first match wins):
+
+| What | How |
+| --- | --- |
+| Backend address | `--backend-url=<url>` flag › `CHZZK_BACKEND_URL` › `"backendUrl"` in `settings.json` in the app's user-data folder (Windows `%APPDATA%\Chzzk\`, macOS `~/Library/Application Support/Chzzk/`) › default `https://live.codecodecode333.dev` |
+| Remote debugging (automated checks) | `CHZZK_REMOTE_DEBUGGING_PORT=<port>` (or Chromium's own `--remote-debugging-port=<port>`); then `http://127.0.0.1:<port>/json/list` gives the page's DevTools WebSocket |
+
+**Against the local dev stack.** The app needs one origin that serves both `/api` and `/live`, like Caddy in
+production. The web frontend's Vite server can't be it: Vite's own CORS handling answers every preflight (the WHEP
+`POST` has one) without allowing `app://chzzk`. `desktop/scripts/dev-backend.mjs` is a tiny plain-HTTP pass-through
+on `:8090` (`/api` → backend `:8080`, `/live` → MediaMTX `127.0.0.1:8889` with the same rewrites as the other proxies);
+`compose.yaml` lets MediaMTX allow `app://chzzk` (`MTX_WEBRTCALLOWORIGINS`).
+
+```sh
+# compose, backend (:8080) and frontend dev server running as in Run locally (.env with MEDIAMTX_AUTH_SECRET)
+node scripts/test-broadcast.mjs --base-url https://localhost:5173 --insecure               # a live 테스트 방송
+node desktop/scripts/dev-backend.mjs                                                        # http://localhost:8090
+cd desktop && CHZZK_BACKEND_URL=http://localhost:8090 npm start
+# or the packaged build: CHZZK_BACKEND_URL=http://localhost:8090 desktop/release/win-unpacked/Chzzk.exe
+```
+
+Checked 2026-11-23 on this PC (Windows 10 x64): the locally built `release/win-unpacked/Chzzk.exe` (same files as the
+installer) with `CHZZK_REMOTE_DEBUGGING_PORT=9333`, read over DevTools: page origin `app://chzzk`, `require`
+undefined in the renderer; the list showed the 테스트 방송 under 방송 중 and an empty 종료 list; opening it played
+1280×720 audio+video (`readyState` 4, `currentTime` advancing); a second 테스트 방송 with `--duration 30` switched to
+"방송이 종료되었습니다" when it ended; stopping the dev backend showed "서버에 연결할 수 없습니다 (http://localhost:8090)".
+
 ## 공개 범위 (access policy)
 
 Who may do what, as the server enforces it (the pages only hide controls; the server stays the authority).
@@ -479,6 +527,7 @@ With your own test keys in `.env`, the stack running (Run locally), and two 회�
 ```sh
 cd backend && ./gradlew test         # HTTP API seam: full Spring context + Testcontainers PostgreSQL
 cd frontend && npm test              # Page components: Vitest + Testing Library, network mocked with MSW
+cd desktop && npm test               # 데스크톱 앱 renderer: same stack, backend at https://backend.test via MSW
 ```
 
 Conventions:
