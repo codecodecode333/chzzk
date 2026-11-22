@@ -10,6 +10,7 @@ import com.chzzk.donation.domain.DonationView;
 import com.chzzk.donation.payment.TossKeys;
 import java.text.NumberFormat;
 import java.util.Locale;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,11 +36,15 @@ class DonationController {
     private final DonationService donations;
     private final DonationHistory history;
     private final String clientKey;
+    /** Prefixed to the success/fail paths: the public site's address in prod, blank (relative paths) in dev. */
+    private final String siteBaseUrl;
 
-    DonationController(DonationService donations, DonationHistory history, TossKeys keys) {
+    DonationController(DonationService donations, DonationHistory history, TossKeys keys,
+                       @Value("${site.public-base-url:}") String siteBaseUrl) {
         this.donations = donations;
         this.history = history;
         this.clientKey = keys.clientKey();
+        this.siteBaseUrl = siteBaseUrl.strip().replaceAll("/+$", "");
     }
 
     @GetMapping("/api/broadcasts/{broadcastId}/donations")
@@ -57,9 +62,9 @@ class DonationController {
         DonationOrder order = donations.start(broadcastId, request.amount(), request.message());
         String orderId = order.orderId().toString();
         return ResponseEntity.status(HttpStatus.CREATED).body(new OrderResponse(orderId, orderName(order.amount()),
-                order.amount(), clientKey, SUCCESS_PATH,
+                order.amount(), clientKey, siteBaseUrl + SUCCESS_PATH,
                 // Toss keeps our query and adds its own; on a cancel it sends no orderId, so ours tells the page.
-                FAIL_PATH + "?orderId=" + orderId + "&broadcastId=" + broadcastId, order.recipient()));
+                siteBaseUrl + FAIL_PATH + "?orderId=" + orderId + "&broadcastId=" + broadcastId, order.recipient()));
     }
 
     @PostMapping("/api/donations/confirm")

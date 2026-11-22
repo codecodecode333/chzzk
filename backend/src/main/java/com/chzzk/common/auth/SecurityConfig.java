@@ -1,5 +1,6 @@
 package com.chzzk.common.auth;
 
+import com.chzzk.common.web.DesktopAppCors;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,6 +32,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  *   <li><b>Access:</b> every URL is reachable here; login is enforced where the data is, by domain services calling
  *       {@link CurrentMember#require()} (401), and ownership/authorship the same way ({@code ForbiddenException},
  *       403). Add URL rules below only for whole areas that need login.</li>
+ *   <li><b>CORS:</b> only the 데스크톱 앱's {@code GET} of the public 방송 reads ({@link DesktopAppCors}).</li>
  * </ul>
  */
 @Configuration(proxyBeanMethods = false)
@@ -44,8 +46,10 @@ class SecurityConfig {
     SecurityFilterChain apiSecurity(HttpSecurity http,
                                     @Qualifier("handlerExceptionResolver") HandlerExceptionResolver problems,
                                     SecurityContextRepository securityContextRepository,
-                                    CsrfTokenRepository csrfTokens) throws Exception {
+                                    CsrfTokenRepository csrfTokens,
+                                    DesktopAppCors desktopAppCors) throws Exception {
         http
+                .cors(cors -> cors.configurationSource(desktopAppCors)) // the 데스크톱 앱's public 방송 reads only
                 .authorizeHttpRequests(access -> access
                         .requestMatchers(MEDIA_SERVER_CALLBACK).permitAll() // shared secret, checked in the controller
                         .anyRequest().permitAll())
