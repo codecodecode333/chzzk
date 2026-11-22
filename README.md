@@ -11,6 +11,7 @@
 | `desktop/` | 데스크톱 앱: Electron + electron-builder, React + Vite + TypeScript renderer (see 데스크톱 앱) |
 | `compose.yaml` | Local PostgreSQL and MediaMTX (backend and frontend run natively) |
 | `deploy/` | Cluster mode: kind config, Kubernetes manifests, up/down scripts (see 클러스터 모드) |
+| `deploy/prod/` | 공개 배포: production Compose stack with Caddy, VM bootstrap and deploy scripts (see 공개 배포) |
 | `load/` | 클러스터 모드 부하(k6)와 유지 확인 스크립트, 실제 실행 기록 `load/results/` |
 | `scripts/test-broadcast.mjs` | 테스트 방송: headless browser with a fake camera puts a 방송 on air (see 라이브) |
 | `mediamtx/mediamtx.yml` | MediaMTX config: WebRTC only, auth via the backend's internal callback (ADR-0002) |
@@ -85,6 +86,62 @@ app's custom protocol origin) may preflight and `GET` the public 방송 list `/a
 `Access-Control-Allow-Credentials`). Every other origin, endpoint and method gets no CORS headers; a non-`GET` from
 the app's origin to those two paths is refused (`403`). If the 데스크톱 앱 changes its scheme or host, set
 `DESKTOP_APP_ORIGIN` to match.
+
+## 공개 배포 (운영 스택)
+
+The public service runs on one VM (ADR-0006) as the Compose stack in `deploy/prod/`, built on the VM from the
+pushed checkout (ARM64 included; no registry):
+
+| Service | What |
+| --- | --- |
+| `caddy` | `caddy:2.10.2-alpine` with the SPA built in (`deploy/prod/caddy/`). Publishes 80/443; Let's Encrypt certificate for `PUBLIC_HOST`, HTTP→HTTPS, HSTS |
+| `backend` | `backend/Dockerfile`, `prod` profile; 영상 파일 in volume `vod-data` |
+| `postgres` | `postgres:16.11-alpine3.22`, volume `postgres-data` |
+| `mediamtx` | `bluenviron/mediamtx:1.21.3` with `mediamtx/mediamtx.yml`; publishes WebRTC media 8189/udp and 8189/tcp, advertising `PUBLIC_IP` |
+
+All restart `unless-stopped` (so also after a VM reboot). Caddy's routes (`deploy/prod/caddy/Caddyfile`), the same as
+the nginx/Vite proxies:
+
+- `/api/*` → backend: bodies up to 1100MB streamed through, no proxy timeouts (uploads may take up to 1h), responses
+  flushed as they come (Range playback).
+- `/live/*` → MediaMTX WHIP/WHEP signaling: `/live` stripped, the session `Location` kept under `/live`,
+  `WWW-Authenticate` dropped. MediaMTX's CORS allows only `DESKTOP_APP_ORIGIN`; Caddy removes it from WHIP (송출)
+  responses, so cross-origin it is WHEP playback only.
+- `/healthz` → the backend's `/healthz` (`{"status":"UP"}` / `{"status":"DOWN"}` with 503).
+- `/internal`, `/internal/*` → `404` (also when reached as `/api/../internal/...`), except `POST
+  /internal/payments/webhook`, Toss's webhook (see 후원), body ≤ 64KB.
+- Everything else: the SPA; unknown `/assets/*` is a real `404`, other paths fall back to `index.html`.
+
+Settings: `deploy/prod/.env` on the VM (git-ignored, mode 600; template `deploy/prod/.env.example`): `PUBLIC_HOST`,
+optional `ACME_EMAIL`, `PUBLIC_IP`, `POSTGRES_PASSWORD`, `MEDIAMTX_AUTH_SECRET`, optional `DESKTOP_APP_ORIGIN` and
+Toss test keys. Compose derives the backend's `PUBLIC_BASE_URL=https://<PUBLIC_HOST>`, `DB_*` and
+`MEDIAMTX_API_URL`. Only Caddy and MediaMTX's media port are published.
+
+**First deploy** (VM: Ubuntu 24.04, SSH key `~/.ssh/chzzk_oci`, user `ubuntu`; from Git Bash on the operator's PC):
+
+```sh
+deploy/prod/deploy.sh --bootstrap <vm-public-ip>
+```
+
+It pushes the committed `HEAD` over SSH into `~/chzzk` on the VM (branch `deploy`; the VM needs no GitHub access),
+then runs `deploy/prod/vm-bootstrap.sh` there as root: Docker Engine + Compose plugin from Docker's apt repository,
+bounded container logs, iptables opening 80/tcp, 443/tcp, 8189/udp and 8189/tcp (live and in
+`/etc/iptables/rules.v4`; the OCI security list is separate), a swap file on small shapes, and `deploy/prod/.env`
+with `PUBLIC_IP` and fresh random secrets (kept if it exists). Then it deploys as below. Review the `.env` once
+(`ssh -i ~/.ssh/chzzk_oci ubuntu@<ip> nano chzzk/deploy/prod/.env`), e.g. to add Toss test keys, and redeploy.
+
+**Every release:** `deploy/prod/deploy.sh <vm-public-ip>` (`DEPLOY_REF=<ref>` for another commit). It pushes,
+runs `docker compose up --build -d --remove-orphans`, prunes old images, waits up to 300s for the backend's
+`/healthz` to say UP (inside the VM), then checks `https://<PUBLIC_HOST>/healthz` from the PC (a warning until DNS
+and the certificate are in place). Data volumes survive deploys; `docker compose down -v` on the VM deletes them.
+
+**Local check** on a PC (Caddy's internal CA instead of Let's Encrypt, ports 18080/18443): see the header of
+`deploy/prod/compose.local.yaml`. Checked 2026-11-23 on this PC (Windows 10, Docker Desktop): SPA and client-route
+fallback, `/healthz` UP and DOWN (503) with PostgreSQL stopped, HTTP→HTTPS redirect, signup/login with `SESSION`
+and `XSRF-TOKEN` both `Secure`, VOD upload (multipart) and Range playback (`206`, byte-identical file), `/live`
+redirect rewritten under `/live` and no `WWW-Authenticate`, WHEP preflight allowed for `app://chzzk` only and not on
+WHIP, the MediaMTX→backend auth callback accepting only the shared secret, `/internal` and `/api/../internal`
+`404`. 라이브 media (8189) needs the real VM.
 
 ## 클러스터 모드 (자동 확장)
 
