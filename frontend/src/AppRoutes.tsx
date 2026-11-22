@@ -6,6 +6,7 @@ import { BroadcastListPage } from './pages/BroadcastListPage'
 import { BroadcastStudioPage } from './pages/BroadcastStudioPage'
 import { BroadcastWatchPage } from './pages/BroadcastWatchPage'
 import { DonationFailPage, DonationSuccessPage } from './pages/DonationResultPages'
+import { DownloadPage } from './pages/DownloadPage'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterVodPage } from './pages/RegisterVodPage'
 import { SignupPage } from './pages/SignupPage'
@@ -32,6 +33,9 @@ export function AppRoutes() {
               </NavLink>
               <NavLink to="/vods" end className={navLinkClass}>
                 다시보기
+              </NavLink>
+              <NavLink to="/download" end className={navLinkClass}>
+                데스크톱 앱
               </NavLink>
             </div>
             <div className="flex items-center gap-2">
@@ -75,6 +79,7 @@ export function AppRoutes() {
             <Route path="/broadcasts/:id" element={<BroadcastWatchPage />} />
             <Route path="/donations/success" element={<DonationSuccessPage />} />
             <Route path="/donations/fail" element={<DonationFailPage />} />
+            <Route path="/download" element={<DownloadPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
           </Routes>
